@@ -67,7 +67,7 @@ typedef IppStatus (CV_STDCALL* ippiSetFunc)(const void*, void *, int, IppiSize);
 template <int channels, typename Type>
 bool IPPSetSimple(cv::Scalar value, void *dataPointer, int step, IppiSize &size, ippiSetFunc func)
 {
-    CV_INSTRUMENT_REGION_IPP()
+    CV_INSTRUMENT_REGION_IPP();
 
     Type values[channels];
     for( int i = 0; i < channels; i++ )
@@ -77,7 +77,7 @@ bool IPPSetSimple(cv::Scalar value, void *dataPointer, int step, IppiSize &size,
 
 static bool IPPSet(const cv::Scalar &value, void *dataPointer, int step, IppiSize &size, int channels, int depth)
 {
-    CV_INSTRUMENT_REGION_IPP()
+    CV_INSTRUMENT_REGION_IPP();
 
     if( channels == 1 )
     {
@@ -663,7 +663,7 @@ static void remapBilinear( const Mat& _src, Mat& _dst, const Mat& _xy,
         cval[k] = saturate_cast<T>(_borderValue[k & 3]);
 
     unsigned width1 = std::max(ssize.width-1, 0), height1 = std::max(ssize.height-1, 0);
-    CV_Assert( ssize.area() > 0 );
+    CV_Assert( !ssize.empty() );
 #if CV_SIMD128
     if( _src.type() == CV_8UC3 )
         width1 = std::max(ssize.width-2, 0);
@@ -1598,12 +1598,12 @@ static bool openvx_remap(Mat src, Mat dst, Mat map1, Mat map2, int interpolation
 
         ctx.setImmediateBorder(prevBorder);
     }
-    catch (ivx::RuntimeError & e)
+    catch (const ivx::RuntimeError & e)
     {
         CV_Error(CV_StsInternal, e.what());
         return false;
     }
-    catch (ivx::WrapperError & e)
+    catch (const ivx::WrapperError & e)
     {
         CV_Error(CV_StsInternal, e.what());
         return false;
@@ -1670,7 +1670,7 @@ void cv::remap( InputArray _src, OutputArray _dst,
                 InputArray _map1, InputArray _map2,
                 int interpolation, int borderType, const Scalar& borderValue )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     static RemapNNFunc nn_tab[] =
     {
@@ -1705,7 +1705,7 @@ void cv::remap( InputArray _src, OutputArray _dst,
         remapLanczos4<Cast<double, double>, float, 1>, 0
     };
 
-    CV_Assert( _map1.size().area() > 0 );
+    CV_Assert( !_map1.empty() );
     CV_Assert( _map2.empty() || (_map2.size() == _map1.size()));
 
     CV_OCL_RUN(_src.dims() <= 2 && _dst.isUMat(),
@@ -1832,7 +1832,7 @@ void cv::convertMaps( InputArray _map1, InputArray _map2,
                       OutputArray _dstmap1, OutputArray _dstmap2,
                       int dstm1type, bool nninterpolate )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     Mat map1 = _map1.getMat(), map2 = _map2.getMat(), dstmap1, dstmap2;
     Size size = map1.size();
@@ -2410,7 +2410,7 @@ static bool ocl_warpTransform_cols4(InputArray _src, OutputArray _dst, InputArra
     scalarToRawData(borderValue, borderBuf, sctype);
 
     UMat src = _src.getUMat(), M0;
-    _dst.create( dsize.area() == 0 ? src.size() : dsize, src.type() );
+    _dst.create( dsize.empty() ? src.size() : dsize, src.type() );
     UMat dst = _dst.getUMat();
 
     float M[9] = {0};
@@ -2514,7 +2514,7 @@ static bool ocl_warpTransform(InputArray _src, OutputArray _dst, InputArray _M0,
     scalarToRawData(borderValue, borderBuf, sctype);
 
     UMat src = _src.getUMat(), M0;
-    _dst.create( dsize.area() == 0 ? src.size() : dsize, src.type() );
+    _dst.create( dsize.empty() ? src.size() : dsize, src.type() );
     UMat dst = _dst.getUMat();
 
     double M[9] = {0};
@@ -2590,7 +2590,7 @@ void cv::warpAffine( InputArray _src, OutputArray _dst,
                      InputArray _M0, Size dsize,
                      int flags, int borderType, const Scalar& borderValue )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     int interpolation = flags & INTER_MAX;
     CV_Assert( _src.channels() <= 4 || (interpolation != INTER_LANCZOS4 &&
@@ -2606,7 +2606,7 @@ void cv::warpAffine( InputArray _src, OutputArray _dst,
                                  borderValue, OCL_OP_AFFINE))
 
     Mat src = _src.getMat(), M0 = _M0.getMat();
-    _dst.create( dsize.area() == 0 ? src.size() : dsize, src.type() );
+    _dst.create( dsize.empty() ? src.size() : dsize, src.type() );
     Mat dst = _dst.getMat();
     CV_Assert( src.cols > 0 && src.rows > 0 );
     if( dst.data == src.data )
@@ -2854,7 +2854,7 @@ public:
             }
         }
 
-        IppStatus status = CV_INSTRUMENT_FUN_IPP(func,(src.ptr(), srcsize, (int)src.step[0], srcroi, dst.ptr(), (int)dst.step[0], dstroi, coeffs, mode));
+        IppStatus status = CV_INSTRUMENT_FUN_IPP(func,(src.ptr();, srcsize, (int)src.step[0], srcroi, dst.ptr(), (int)dst.step[0], dstroi, coeffs, mode));
         if (status != ippStsNoErr)
             *ok = false;
         else
@@ -2898,7 +2898,7 @@ void warpPerspective(int src_type,
 void cv::warpPerspective( InputArray _src, OutputArray _dst, InputArray _M0,
                           Size dsize, int flags, int borderType, const Scalar& borderValue )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     CV_Assert( _src.total() > 0 );
 
@@ -2912,7 +2912,7 @@ void cv::warpPerspective( InputArray _src, OutputArray _dst, InputArray _M0,
                               OCL_OP_PERSPECTIVE))
 
     Mat src = _src.getMat(), M0 = _M0.getMat();
-    _dst.create( dsize.area() == 0 ? src.size() : dsize, src.type() );
+    _dst.create( dsize.empty() ? src.size() : dsize, src.type() );
     Mat dst = _dst.getMat();
 
     if( dst.data == src.data )
@@ -2996,7 +2996,7 @@ void cv::warpPerspective( InputArray _src, OutputArray _dst, InputArray _M0,
 
 cv::Mat cv::getRotationMatrix2D( Point2f center, double angle, double scale )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     angle *= CV_PI/180;
     double alpha = std::cos(angle)*scale;
@@ -3041,7 +3041,7 @@ cv::Mat cv::getRotationMatrix2D( Point2f center, double angle, double scale )
  */
 cv::Mat cv::getPerspectiveTransform(const Point2f src[], const Point2f dst[], int solveMethod)
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     Mat M(3, 3, CV_64F), X(8, 1, CV_64F, M.ptr());
     double a[8][8], b[8];

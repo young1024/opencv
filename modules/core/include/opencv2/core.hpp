@@ -75,6 +75,7 @@
         @defgroup core_utils_sse SSE utilities
         @defgroup core_utils_neon NEON utilities
         @defgroup core_utils_softfloat Softfloat support
+        @defgroup core_utils_samples Utility functions for OpenCV samples
     @}
     @defgroup core_opengl OpenGL interoperability
     @defgroup core_ipp Intel IPP Asynchronous C/C++ Converters
@@ -415,8 +416,13 @@ The function cv::divide divides one array by another:
 or a scalar by an array when there is no src1 :
 \f[\texttt{dst(I) = saturate(scale/src2(I))}\f]
 
-When src2(I) is zero, dst(I) will also be zero. Different channels of
-multi-channel arrays are processed independently.
+Different channels of multi-channel arrays are processed independently.
+
+For integer types when src2(I) is zero, dst(I) will also be zero.
+
+@note In case of floating point data there is no special defined behavior for zero src2(I) values.
+Regular floating-point division is used.
+Expect correct IEEE-754 behaviour for floating-point data (with NaN, Inf result values).
 
 @note Saturation is not applied when the output array has the depth CV_32S. You may even get
 result of an incorrect sign in the case of overflow.
@@ -1341,6 +1347,17 @@ You may even get a negative value in the case of overflow.
 */
 CV_EXPORTS_W void absdiff(InputArray src1, InputArray src2, OutputArray dst);
 
+/** @brief  This is an overloaded member function, provided for convenience (python)
+Copies the matrix to another one.
+When the operation mask is specified, if the Mat::create call shown above reallocates the matrix, the newly allocated matrix is initialized with all zeros before copying the data.
+@param src source matrix.
+@param dst Destination matrix. If it does not have a proper size or type before the operation, it is
+reallocated.
+@param mask Operation mask of the same size as \*this. Its non-zero elements indicate which matrix
+elements need to be copied. The mask has to be of type CV_8U and can have 1 or multiple channels.
+*/
+
+void CV_EXPORTS_W copyTo(InputArray src, OutputArray dst, InputArray mask);
 /** @brief  Checks if array elements lie between the elements of two other arrays.
 
 The function checks the range as follows:
@@ -2943,7 +2960,7 @@ An example on K-means clustering
 /** @brief Finds centers of clusters and groups input samples around the clusters.
 
 The function kmeans implements a k-means algorithm that finds the centers of cluster_count clusters
-and groups the input samples around the clusters. As an output, \f$\texttt{labels}_i\f$ contains a
+and groups the input samples around the clusters. As an output, \f$\texttt{bestLabels}_i\f$ contains a
 0-based cluster index for the sample stored in the \f$i^{th}\f$ row of the samples matrix.
 
 @note
@@ -2997,7 +3014,8 @@ public:
 class CV_EXPORTS Formatter
 {
 public:
-    enum { FMT_DEFAULT = 0,
+    enum FormatType {
+           FMT_DEFAULT = 0,
            FMT_MATLAB  = 1,
            FMT_CSV     = 2,
            FMT_PYTHON  = 3,
@@ -3009,11 +3027,12 @@ public:
 
     virtual Ptr<Formatted> format(const Mat& mtx) const = 0;
 
+    virtual void set16fPrecision(int p = 4) = 0;
     virtual void set32fPrecision(int p = 8) = 0;
     virtual void set64fPrecision(int p = 16) = 0;
     virtual void setMultiline(bool ml = true) = 0;
 
-    static Ptr<Formatter> get(int fmt = FMT_DEFAULT);
+    static Ptr<Formatter> get(Formatter::FormatType fmt = FMT_DEFAULT);
 
 };
 
@@ -3036,7 +3055,7 @@ String& operator << (String& out, const Mat& mtx)
 
 class CV_EXPORTS Algorithm;
 
-template<typename _Tp> struct ParamType {};
+template<typename _Tp, typename _EnumTp = void> struct ParamType {};
 
 
 /** @brief This is a base class for all more or less complex algorithms in OpenCV
@@ -3062,7 +3081,7 @@ public:
 
     /** @brief Stores algorithm parameters in a file storage
     */
-    virtual void write(FileStorage& fs) const { (void)fs; }
+    virtual void write(FileStorage& fs) const { CV_UNUSED(fs); }
 
     /** @brief simplified API for language bindings
     * @overload
@@ -3071,7 +3090,7 @@ public:
 
     /** @brief Reads algorithm parameters from a file storage
     */
-    CV_WRAP virtual void read(const FileNode& fn) { (void)fn; }
+    CV_WRAP virtual void read(const FileNode& fn) { CV_UNUSED(fn); }
 
     /** @brief Returns true if the Algorithm is empty (e.g. in the very beginning or after unsuccessful read
     */
@@ -3149,9 +3168,9 @@ protected:
     void writeFormat(FileStorage& fs) const;
 };
 
-struct Param {
-    enum { INT=0, BOOLEAN=1, REAL=2, STRING=3, MAT=4, MAT_VECTOR=5, ALGORITHM=6, FLOAT=7,
-           UNSIGNED_INT=8, UINT64=9, UCHAR=11, SCALAR=12 };
+enum struct Param {
+    INT=0, BOOLEAN=1, REAL=2, STRING=3, MAT=4, MAT_VECTOR=5, ALGORITHM=6, FLOAT=7,
+    UNSIGNED_INT=8, UINT64=9, UCHAR=11, SCALAR=12
 };
 
 
@@ -3161,7 +3180,7 @@ template<> struct ParamType<bool>
     typedef bool const_param_type;
     typedef bool member_type;
 
-    enum { type = Param::BOOLEAN };
+    static const Param type = Param::BOOLEAN;
 };
 
 template<> struct ParamType<int>
@@ -3169,7 +3188,7 @@ template<> struct ParamType<int>
     typedef int const_param_type;
     typedef int member_type;
 
-    enum { type = Param::INT };
+    static const Param type = Param::INT;
 };
 
 template<> struct ParamType<double>
@@ -3177,7 +3196,7 @@ template<> struct ParamType<double>
     typedef double const_param_type;
     typedef double member_type;
 
-    enum { type = Param::REAL };
+    static const Param type = Param::REAL;
 };
 
 template<> struct ParamType<String>
@@ -3185,7 +3204,7 @@ template<> struct ParamType<String>
     typedef const String& const_param_type;
     typedef String member_type;
 
-    enum { type = Param::STRING };
+    static const Param type = Param::STRING;
 };
 
 template<> struct ParamType<Mat>
@@ -3193,7 +3212,7 @@ template<> struct ParamType<Mat>
     typedef const Mat& const_param_type;
     typedef Mat member_type;
 
-    enum { type = Param::MAT };
+    static const Param type = Param::MAT;
 };
 
 template<> struct ParamType<std::vector<Mat> >
@@ -3201,7 +3220,7 @@ template<> struct ParamType<std::vector<Mat> >
     typedef const std::vector<Mat>& const_param_type;
     typedef std::vector<Mat> member_type;
 
-    enum { type = Param::MAT_VECTOR };
+    static const Param type = Param::MAT_VECTOR;
 };
 
 template<> struct ParamType<Algorithm>
@@ -3209,7 +3228,7 @@ template<> struct ParamType<Algorithm>
     typedef const Ptr<Algorithm>& const_param_type;
     typedef Ptr<Algorithm> member_type;
 
-    enum { type = Param::ALGORITHM };
+    static const Param type = Param::ALGORITHM;
 };
 
 template<> struct ParamType<float>
@@ -3217,7 +3236,7 @@ template<> struct ParamType<float>
     typedef float const_param_type;
     typedef float member_type;
 
-    enum { type = Param::FLOAT };
+    static const Param type = Param::FLOAT;
 };
 
 template<> struct ParamType<unsigned>
@@ -3225,7 +3244,7 @@ template<> struct ParamType<unsigned>
     typedef unsigned const_param_type;
     typedef unsigned member_type;
 
-    enum { type = Param::UNSIGNED_INT };
+    static const Param type = Param::UNSIGNED_INT;
 };
 
 template<> struct ParamType<uint64>
@@ -3233,7 +3252,7 @@ template<> struct ParamType<uint64>
     typedef uint64 const_param_type;
     typedef uint64 member_type;
 
-    enum { type = Param::UINT64 };
+    static const Param type = Param::UINT64;
 };
 
 template<> struct ParamType<uchar>
@@ -3241,7 +3260,7 @@ template<> struct ParamType<uchar>
     typedef uchar const_param_type;
     typedef uchar member_type;
 
-    enum { type = Param::UCHAR };
+    static const Param type = Param::UCHAR;
 };
 
 template<> struct ParamType<Scalar>
@@ -3249,7 +3268,16 @@ template<> struct ParamType<Scalar>
     typedef const Scalar& const_param_type;
     typedef Scalar member_type;
 
-    enum { type = Param::SCALAR };
+    static const Param type = Param::SCALAR;
+};
+
+template<typename _Tp>
+struct ParamType<_Tp, typename std::enable_if< std::is_enum<_Tp>::value >::type>
+{
+    typedef typename std::underlying_type<_Tp>::type const_param_type;
+    typedef typename std::underlying_type<_Tp>::type member_type;
+
+    static const Param type = Param::INT;
 };
 
 //! @} core_basic

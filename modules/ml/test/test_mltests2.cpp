@@ -237,7 +237,7 @@ TEST(ML_ANN, ActivationFunction)
         x->save(dataname + activationName[i] + ".yml");
 #else
         Ptr<ml::ANN_MLP> y = Algorithm::load<ANN_MLP>(dataname + activationName[i] + ".yml");
-        ASSERT_TRUE(y != NULL) << "Could not load   " << dataname + activationName[i] + ".yml";
+        ASSERT_TRUE(y) << "Could not load   " << dataname + activationName[i] + ".yml";
         Mat testSamples = tdata->getTestSamples();
         Mat rx, ry, dst;
         x->predict(testSamples, rx);
@@ -330,7 +330,7 @@ TEST_P(ML_ANN_METHOD, Test)
 #endif
         ASSERT_FALSE(r_gold.empty());
         Ptr<ml::ANN_MLP> y = Algorithm::load<ANN_MLP>(filename);
-        ASSERT_TRUE(y != NULL) << "Could not load   " << filename;
+        ASSERT_TRUE(y) << "Could not load   " << filename;
         Mat rx, ry;
         for (int j = 0; j < 4; j++)
         {
@@ -421,10 +421,9 @@ CV_MLBaseTest::~CV_MLBaseTest()
     theRNG().state = initSeed;
 }
 
-int CV_MLBaseTest::read_params( CvFileStorage* __fs )
+int CV_MLBaseTest::read_params( const cv::FileStorage& _fs )
 {
     CV_TRACE_FUNCTION();
-    FileStorage _fs(__fs, false);
     if( !_fs.isOpened() )
         test_case_count = -1;
     else
@@ -452,7 +451,7 @@ void CV_MLBaseTest::run( int )
     string filename = ts->get_data_path();
     filename += get_validation_filename();
     validationFS.open( filename, FileStorage::READ );
-    read_params( *validationFS );
+    read_params( validationFS );
 
     int code = cvtest::TS::OK;
     for (int i = 0; i < test_case_count; i++)

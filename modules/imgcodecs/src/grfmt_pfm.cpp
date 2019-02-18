@@ -17,8 +17,8 @@ static_assert(sizeof(float) == 4, "float must be 32 bit.");
 bool is_byte_order_swapped(double scale)
 {
   // ".pfm" format file specifies that:
-  // positive scale means big endianess;
-  // negative scale means little endianess.
+  // positive scale means big endianness;
+  // negative scale means little endianness.
 
   #ifdef WORDS_BIGENDIAN
     return scale < 0.0;
@@ -79,7 +79,7 @@ PFMDecoder::~PFMDecoder()
 {
 }
 
-PFMDecoder::PFMDecoder()
+PFMDecoder::PFMDecoder() : m_scale_factor(0), m_swap_byte_order(false)
 {
   m_strm.close();
 }
@@ -186,13 +186,13 @@ PFMEncoder::~PFMEncoder()
 bool PFMEncoder::isFormatSupported(int depth) const
 {
   // any depth will be converted into 32-bit float.
-  (void) depth;
+  CV_UNUSED(depth);
   return true;
 }
 
 bool PFMEncoder::write(const Mat& img, const std::vector<int>& params)
 {
-  (void) params;
+  CV_UNUSED(params);
 
   WLByteStream strm;
   if (m_buf) {

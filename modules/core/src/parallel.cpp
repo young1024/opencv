@@ -319,7 +319,7 @@ namespace
                 cv::instr::InstrTLSStruct *pInstrTLS = &cv::instr::getInstrumentTLSStruct();
                 pInstrTLS->pCurrentNode = ctx.pThreadRoot; // Initialize TLS node for thread
             }
-            CV_INSTRUMENT_REGION()
+            CV_INSTRUMENT_REGION();
 #endif
 
             // propagate main thread state
@@ -410,6 +410,8 @@ namespace
                     });
         }
     };
+#elif defined HAVE_OPENMP
+    typedef ParallelLoopBodyWrapper ProxyLoopBody;
 #elif defined HAVE_GCD
     typedef ParallelLoopBodyWrapper ProxyLoopBody;
     static void block_function(void* context, size_t index)
@@ -445,7 +447,16 @@ static int numThreads = -1;
 #elif defined HAVE_HPX
 // nothing for HPX
 #elif defined HAVE_OPENMP
-static int numThreadsMax = omp_get_max_threads();
+static inline int _initMaxThreads()
+{
+    int maxThreads = omp_get_max_threads();
+    if (!utils::getConfigurationParameterBool("OPENCV_FOR_OPENMP_DYNAMIC_DISABLE", false))
+    {
+        omp_set_dynamic(maxThreads);
+    }
+    return maxThreads;
+}
+static int numThreadsMax = _initMaxThreads();
 #elif defined HAVE_GCD
 // nothing for GCD
 #elif defined WINRT
@@ -491,7 +502,7 @@ void cv::parallel_for_(const cv::Range& range, const cv::ParallelLoopBody& body,
     CV_TRACE_ARG_VALUE(nstripes, "nstripes", (int64)nstripes);
 #endif
 
-    CV_INSTRUMENT_REGION_MT_FORK()
+    CV_INSTRUMENT_REGION_MT_FORK();
     if (range.empty())
         return;
 
@@ -516,7 +527,7 @@ void cv::parallel_for_(const cv::Range& range, const cv::ParallelLoopBody& body,
     else // nested parallel_for_() calls are not parallelized
 #endif // CV_PARALLEL_FRAMEWORK
     {
-        (void)nstripes;
+        CV_UNUSED(nstripes);
         body(range);
     }
 }
@@ -678,7 +689,7 @@ unsigned defaultNumberOfThreads()
 
 void cv::setNumThreads( int threads_ )
 {
-    (void)threads_;
+    CV_UNUSED(threads_);
 #ifdef CV_PARALLEL_FRAMEWORK
     int threads = (threads_ < 0) ? defaultNumberOfThreads() : (unsigned)threads_;
     numThreads = threads;
