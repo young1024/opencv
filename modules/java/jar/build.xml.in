@@ -29,14 +29,40 @@
   </target>
 
   <target name="javadoc">
+    <copy file="@OpenCV_SOURCE_DIR@/doc/mymath.js"
+      todir="@OPENCV_JAVADOC_DESTINATION@" />
+
+    <!-- synchronize with platforms\android\build_sdk.py -->
     <javadoc
       packagenames="org.opencv.*"
       sourcepath="java"
-      destdir="@OpenCV_BINARY_DIR@/doc/doxygen/html/javadoc"
+      destdir="@OPENCV_JAVADOC_DESTINATION@"
       Windowtitle="OpenCV @OPENCV_VERSION_PLAIN@ Java documentation"
       Doctitle="OpenCV Java documentation (@OPENCV_VERSION@)"
       bottom="Generated on ${timestamp} / OpenCV @OPENCV_VCSVERSION@"
-      />
+      failonerror="true"
+      encoding="UTF-8" charset="UTF-8" docencoding="UTF-8"
+      @CMAKE_CONFIG_OPENCV_JAVADOC_LINK@
+      additionalparam="--allow-script-in-comments"
+      >
+      <bottom>
+         <![CDATA[
+            <script>
+              var url = window.location.href;
+              var pos = url.lastIndexOf('/javadoc/');
+              url = pos >= 0 ? (url.substring(0, pos) + '/javadoc/mymath.js') : (window.location.origin + '/mymath.js');
+              var script = document.createElement('script');
+              script.setAttribute("src", url);
+              script.setAttribute("defer", "")
+              document.head.appendChild(script);
+              script = document.createElement('script');
+              script.setAttribute("src", '@OPENCV_MATHJAX_RELPATH@/es5/tex-chtml.js');
+              script.setAttribute("defer", "")
+              document.head.appendChild(script);
+            </script>
+         ]]>
+      </bottom>
+    </javadoc>
   </target>
 
 </project>

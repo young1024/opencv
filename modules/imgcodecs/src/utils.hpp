@@ -42,8 +42,7 @@
 #ifndef _UTILS_H_
 #define _UTILS_H_
 
-namespace cv
-{
+namespace cv {
 
 int validateToInt(size_t step);
 
@@ -116,6 +115,8 @@ void icvCvt_BGR5652BGR_8u_C2C3R( const uchar* bgr565, int bgr565_step,
                                  uchar* bgr, int bgr_step, Size size );
 void icvCvt_CMYK2BGR_8u_C4C3R( const uchar* cmyk, int cmyk_step,
                                uchar* bgr, int bgr_step, Size size );
+void icvCvt_CMYK2RGB_8u_C4C3R( const uchar* cmyk, int cmyk_step,
+                               uchar* rgb, int rgb_step, Size size );
 void icvCvt_CMYK2Gray_8u_C4C1R( const uchar* ycck, int ycck_step,
                                 uchar* gray, int gray_step, Size size );
 
@@ -139,6 +140,6 @@ CV_INLINE bool  isBigEndian( void )
     return (((const int*)"\0\x1\x2\x3\x4\x5\x6\x7")[0] & 255) != 0;
 }
 
-}
+}  // namespace
 
 #endif/*_UTILS_H_*/

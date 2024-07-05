@@ -1,13 +1,16 @@
 cmake_minimum_required(VERSION 3.6)
 
-# Enable C++11
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-
 set(target mixed_sample)
 project(${target} CXX)
 
-set(ANDROID_OPENCV_COMPONENTS "opencv_java" CACHE STRING "")
+if (OPENCV_FROM_SDK)
+  message(STATUS "Using OpenCV from local SDK")
+  set(ANDROID_OPENCV_COMPONENTS "opencv_java" CACHE STRING "")
+else()
+  message(STATUS "Using OpenCV from AAR (Maven repo)")
+  set(ANDROID_OPENCV_COMPONENTS "OpenCV::opencv_java${OPENCV_VERSION_MAJOR}" CACHE STRING "")
+endif()
+
 message(STATUS "ANDROID_ABI=${ANDROID_ABI}")
 find_package(OpenCV REQUIRED COMPONENTS ${ANDROID_OPENCV_COMPONENTS})
 

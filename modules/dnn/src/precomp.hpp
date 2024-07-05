@@ -39,8 +39,14 @@
 //
 //M*/
 
-#include <opencv2/core.hpp>
+#if !defined(BUILD_PLUGIN)
 #include "cvconfig.h"
+#else
+#include <opencv2/core/cvdef.h>
+#undef __OPENCV_BUILD  // allow public API only
+#endif
+
+#include <opencv2/core.hpp>
 
 #ifndef CV_OCL4DNN
 #define CV_OCL4DNN 0
@@ -53,19 +59,34 @@
 #else
 #undef HAVE_OPENCL
 #endif
+
+#ifndef CV_CUDA4DNN
+#define CV_CUDA4DNN 0
+#endif
+
+#if CV_CUDA4DNN
+#ifndef HAVE_CUDA
+#error "Configuration error: re-run CMake from clean build directory"
+#endif
+#else
+#undef HAVE_CUDA
+#endif
+
+#include <numeric>
+#include <memory>
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <set>
+#include <iterator>
+
 #include <opencv2/core/ocl.hpp>
 #include <opencv2/core/opencl/ocl_defs.hpp>
-
 
 #include <opencv2/core/utils/trace.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/dnn/all_layers.hpp>
+#include <opencv2/dnn/shape_utils.hpp>
 
-
-namespace cv { namespace dnn {
-CV__DNN_INLINE_NS_BEGIN
-#define IS_DNN_OPENCL_TARGET(id) (id == DNN_TARGET_OPENCL || id == DNN_TARGET_OPENCL_FP16)
-Mutex& getInitializationMutex();
-void initializeLayerFactory();
-CV__DNN_INLINE_NS_END
-}} // namespace
+#include "dnn_common.hpp"

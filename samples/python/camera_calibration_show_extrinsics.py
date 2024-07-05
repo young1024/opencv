@@ -1,13 +1,26 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
+'''
+Plot camera calibration extrinsics.
+
+usage:
+    camera_calibration_show_extrinsics.py [--calibration <input path>] [--cam_width] [--cam_height] [--scale_focal] [--patternCentric ]
+
+default values:
+    --calibration    : left_intrinsics.yml
+    --cam_width      : 0.064/2
+    --cam_height     : 0.048/2
+    --scale_focal    : 40
+    --patternCentric : True
+'''
+
+# Python 2/3 compatibility
+from __future__ import print_function
+
 import numpy as np
-from matplotlib import cm
-from numpy import linspace
-import argparse
 import cv2 as cv
+
+from numpy import linspace
 
 def inverse_homogeneoux_matrix(M):
     R = M[0:3, 0:3]
@@ -119,6 +132,8 @@ def create_board_model(extrinsics, board_width, board_height, square_size, draw_
 def draw_camera_boards(ax, camera_matrix, cam_width, cam_height, scale_focal,
                        extrinsics, board_width, board_height, square_size,
                        patternCentric):
+    from matplotlib import cm
+
     min_values = np.zeros((3,1))
     min_values = np.inf
     max_values = np.zeros((3,1))
@@ -158,6 +173,8 @@ def draw_camera_boards(ax, camera_matrix, cam_width, cam_height, scale_focal,
     return min_values, max_values
 
 def main():
+    import argparse
+
     parser = argparse.ArgumentParser(description='Plot camera calibration extrinsics.',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--calibration', type=str, default='left_intrinsics.yml',
@@ -179,9 +196,12 @@ def main():
     camera_matrix = fs.getNode('camera_matrix').mat()
     extrinsics = fs.getNode('extrinsic_parameters').mat()
 
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # pylint: disable=unused-variable
+
     fig = plt.figure()
     ax = fig.gca(projection='3d')
-    ax.set_aspect("equal")
+    ax.set_aspect("auto")
 
     cam_width = args.cam_width
     cam_height = args.cam_height
@@ -211,6 +231,10 @@ def main():
     ax.set_title('Extrinsic Parameters Visualization')
 
     plt.show()
+    print('Done')
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
+    print(__doc__)
     main()
+    cv.destroyAllWindows()

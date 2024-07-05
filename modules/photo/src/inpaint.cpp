@@ -45,6 +45,9 @@
 //
 // */
 
+#include <queue>
+#include <type_traits>
+
 #include "precomp.hpp"
 #include "opencv2/imgproc/imgproc_c.h"
 #include "opencv2/photo/legacy/constants_c.h"
@@ -52,6 +55,16 @@
 #undef CV_MAT_ELEM_PTR_FAST
 #define CV_MAT_ELEM_PTR_FAST( mat, row, col, pix_size )  \
      ((mat).data.ptr + (size_t)(mat).step*(row) + (pix_size)*(col))
+
+template<typename T>
+typename std::enable_if<std::is_floating_point<T>::value, T>::type round_cast(float val) {
+   return cv::saturate_cast<T>(val);
+}
+
+template<typename T>
+typename std::enable_if<!std::is_floating_point<T>::value, T>::type round_cast(float val) {
+   return cv::saturate_cast<T>(val + 0.5);
+}
 
 inline float
 min4( float a, float b, float c, float d )
@@ -71,8 +84,16 @@ typedef struct CvHeapElem
 {
     float T;
     int i,j;
-    struct CvHeapElem* prev;
-    struct CvHeapElem* next;
+    int order;  // to keep insertion order
+
+    bool operator > (const CvHeapElem& rhs) const {
+        if (T > rhs.T) {
+            return true;
+        } else if (T < rhs.T) {
+            return false;
+        }
+        return order > rhs.order;
+    }
 }
 CvHeapElem;
 
@@ -84,42 +105,10 @@ private:
     CvPriorityQueueFloat& operator=(const CvPriorityQueueFloat &); // assign disabled
 
 protected:
-    CvHeapElem *mem,*empty,*head,*tail;
-    int num,in;
+    std::priority_queue<CvHeapElem, std::vector<CvHeapElem>,std::greater<CvHeapElem> > queue;
+    int next_order;
 
 public:
-    bool Init( const CvMat* f )
-    {
-        int i,j;
-        for( i = num = 0; i < f->rows; i++ )
-        {
-            for( j = 0; j < f->cols; j++ )
-                num += CV_MAT_ELEM(*f,uchar,i,j)!=0;
-        }
-        if (num<=0) return false;
-        mem = (CvHeapElem*)cvAlloc((num+2)*sizeof(CvHeapElem));
-        if (mem==NULL) return false;
-
-        head       = mem;
-        head->i    = head->j = -1;
-        head->prev = NULL;
-        head->next = mem+1;
-        head->T    = -FLT_MAX;
-        empty      = mem+1;
-        for (i=1; i<=num; i++) {
-            mem[i].prev   = mem+i-1;
-            mem[i].next   = mem+i+1;
-            mem[i].i      = -1;
-            mem[i].T      = FLT_MAX;
-        }
-        tail       = mem+i;
-        tail->i    = tail->j = -1;
-        tail->prev = mem+i-1;
-        tail->next = NULL;
-        tail->T    = FLT_MAX;
-        return true;
-    }
-
     bool Add(const CvMat* f) {
         int i,j;
         for (i=0; i<f->rows; i++) {
@@ -133,71 +122,33 @@ public:
     }
 
     bool Push(int i, int j, float T) {
-        CvHeapElem *tmp=empty,*add=empty;
-        if (empty==tail) return false;
-        while (tmp->prev->T>T) tmp = tmp->prev;
-        if (tmp!=empty) {
-            add->prev->next = add->next;
-            add->next->prev = add->prev;
-            empty = add->next;
-            add->prev = tmp->prev;
-            add->next = tmp;
-            add->prev->next = add;
-            add->next->prev = add;
-        } else {
-            empty = empty->next;
-        }
-        add->i = i;
-        add->j = j;
-        add->T = T;
-        in++;
-        //      printf("push i %3d  j %3d  T %12.4e  in %4d\n",i,j,T,in);
+        queue.push({T, i, j, next_order});
+        ++next_order;
         return true;
     }
 
     bool Pop(int *i, int *j) {
-        CvHeapElem *tmp=head->next;
-        if (empty==tmp) return false;
-        *i = tmp->i;
-        *j = tmp->j;
-        tmp->prev->next = tmp->next;
-        tmp->next->prev = tmp->prev;
-        tmp->prev = empty->prev;
-        tmp->next = empty;
-        tmp->prev->next = tmp;
-        tmp->next->prev = tmp;
-        empty = tmp;
-        in--;
-        //      printf("pop  i %3d  j %3d  T %12.4e  in %4d\n",tmp->i,tmp->j,tmp->T,in);
+        if (queue.empty()) {
+            return false;
+        }
+        *i = queue.top().i;
+        *j = queue.top().j;
+        queue.pop();
         return true;
     }
 
     bool Pop(int *i, int *j, float *T) {
-        CvHeapElem *tmp=head->next;
-        if (empty==tmp) return false;
-        *i = tmp->i;
-        *j = tmp->j;
-        *T = tmp->T;
-        tmp->prev->next = tmp->next;
-        tmp->next->prev = tmp->prev;
-        tmp->prev = empty->prev;
-        tmp->next = empty;
-        tmp->prev->next = tmp;
-        tmp->next->prev = tmp;
-        empty = tmp;
-        in--;
-        //      printf("pop  i %3d  j %3d  T %12.4e  in %4d\n",tmp->i,tmp->j,tmp->T,in);
+        if (queue.empty()) {
+            return false;
+        }
+        *i = queue.top().i;
+        *j = queue.top().j;
+        *T = queue.top().T;
+        queue.pop();
         return true;
     }
 
-    CvPriorityQueueFloat(void) {
-        num=in=0;
-        mem=empty=head=tail=NULL;
-    }
-
-    ~CvPriorityQueueFloat(void)
-    {
-        cvFree( &mem );
+    CvPriorityQueueFloat(void) : queue(), next_order() {
     }
 };
 
@@ -299,7 +250,7 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -308,50 +259,58 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
                            FastMarching_solve(i+1,j,i,j+1,f,t));
                CV_MAT_ELEM(*t,float,i,j) = dist;
 
+               cv::Point2f gradT[3];
                for (color=0; color<=2; color++) {
-                  cv::Point2f gradI,gradT,r;
-                  float Ia=0,Jx=0,Jy=0,s=1.0e-20f,w,dst,lev,dir,sat;
-
                   if (CV_MAT_ELEM(*f,uchar,i,j+1)!=INSIDE) {
                      if (CV_MAT_ELEM(*f,uchar,i,j-1)!=INSIDE) {
-                        gradT.x=(float)((CV_MAT_ELEM(*t,float,i,j+1)-CV_MAT_ELEM(*t,float,i,j-1)))*0.5f;
+                        gradT[color].x=(float)((CV_MAT_ELEM(*t,float,i,j+1)-CV_MAT_ELEM(*t,float,i,j-1)))*0.5f;
                      } else {
-                        gradT.x=(float)((CV_MAT_ELEM(*t,float,i,j+1)-CV_MAT_ELEM(*t,float,i,j)));
+                        gradT[color].x=(float)((CV_MAT_ELEM(*t,float,i,j+1)-CV_MAT_ELEM(*t,float,i,j)));
                      }
                   } else {
                      if (CV_MAT_ELEM(*f,uchar,i,j-1)!=INSIDE) {
-                        gradT.x=(float)((CV_MAT_ELEM(*t,float,i,j)-CV_MAT_ELEM(*t,float,i,j-1)));
+                        gradT[color].x=(float)((CV_MAT_ELEM(*t,float,i,j)-CV_MAT_ELEM(*t,float,i,j-1)));
                      } else {
-                        gradT.x=0;
+                        gradT[color].x=0;
                      }
                   }
                   if (CV_MAT_ELEM(*f,uchar,i+1,j)!=INSIDE) {
                      if (CV_MAT_ELEM(*f,uchar,i-1,j)!=INSIDE) {
-                        gradT.y=(float)((CV_MAT_ELEM(*t,float,i+1,j)-CV_MAT_ELEM(*t,float,i-1,j)))*0.5f;
+                        gradT[color].y=(float)((CV_MAT_ELEM(*t,float,i+1,j)-CV_MAT_ELEM(*t,float,i-1,j)))*0.5f;
                      } else {
-                        gradT.y=(float)((CV_MAT_ELEM(*t,float,i+1,j)-CV_MAT_ELEM(*t,float,i,j)));
+                        gradT[color].y=(float)((CV_MAT_ELEM(*t,float,i+1,j)-CV_MAT_ELEM(*t,float,i,j)));
                      }
                   } else {
                      if (CV_MAT_ELEM(*f,uchar,i-1,j)!=INSIDE) {
-                        gradT.y=(float)((CV_MAT_ELEM(*t,float,i,j)-CV_MAT_ELEM(*t,float,i-1,j)));
+                        gradT[color].y=(float)((CV_MAT_ELEM(*t,float,i,j)-CV_MAT_ELEM(*t,float,i-1,j)));
                      } else {
-                        gradT.y=0;
+                        gradT[color].y=0;
                      }
                   }
-                  for (k=i-range; k<=i+range; k++) {
-                     int km=k-1+(k==1),kp=k-1-(k==t->rows-2);
-                     for (l=j-range; l<=j+range; l++) {
-                        int lm=l-1+(l==1),lp=l-1-(l==t->cols-2);
-                        if (k>0&&l>0&&k<t->rows-1&&l<t->cols-1) {
-                           if ((CV_MAT_ELEM(*f,uchar,k,l)!=INSIDE)&&
-                               ((l-j)*(l-j)+(k-i)*(k-i)<=range*range)) {
+               }
+
+               cv::Point2f gradI,r;
+               float Jx[3] = {0,0,0};
+               float Jy[3] = {0,0,0};
+               float Ia[3] = {0,0,0};
+               float s[3] = {1.0e-20f,1.0e-20f,1.0e-20f};
+               float w,dst,lev,dir,sat;
+
+               for (k=i-range; k<=i+range; k++) {
+                  int km=k-1+(k==1),kp=k-1-(k==t->rows-2);
+                  for (l=j-range; l<=j+range; l++) {
+                     int lm=l-1+(l==1),lp=l-1-(l==t->cols-2);
+                     if (k>0&&l>0&&k<t->rows-1&&l<t->cols-1) {
+                        if ((CV_MAT_ELEM(*f,uchar,k,l)!=INSIDE)&&
+                            ((l-j)*(l-j)+(k-i)*(k-i)<=range*range)) {
+                           for (color=0; color<=2; color++) {
                               r.y     = (float)(i-k);
                               r.x     = (float)(j-l);
 
                               dst = (float)(1./(VectorLength(r)*sqrt((double)VectorLength(r))));
                               lev = (float)(1./(1+fabs(CV_MAT_ELEM(*t,float,k,l)-CV_MAT_ELEM(*t,float,i,j))));
 
-                              dir=VectorScalMult(r,gradT);
+                              dir=VectorScalMult(r,gradT[color]);
                               if (fabs(dir)<=0.01) dir=0.000001f;
                               w = (float)fabs(dst*lev*dir);
 
@@ -381,18 +340,18 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
                                     gradI.y=0;
                                  }
                               }
-                              Ia += (float)w * (float)(CV_MAT_3COLOR_ELEM(*out,uchar,km,lm,color));
-                              Jx -= (float)w * (float)(gradI.x*r.x);
-                              Jy -= (float)w * (float)(gradI.y*r.y);
-                              s  += w;
+                              Ia[color] += (float)w * (float)(CV_MAT_3COLOR_ELEM(*out,uchar,k-1,l-1,color));
+                              Jx[color] -= (float)w * (float)(gradI.x*r.x);
+                              Jy[color] -= (float)w * (float)(gradI.y*r.y);
+                              s[color]  += w;
                            }
                         }
                      }
                   }
-                  sat = (float)((Ia/s+(Jx+Jy)/(sqrt(Jx*Jx+Jy*Jy)+1.0e-20f)+0.5f));
-                  {
-                  CV_MAT_3COLOR_ELEM(*out,uchar,i-1,j-1,color) = cv::saturate_cast<uchar>(sat);
-                  }
+               }
+               for (color=0; color<=2; color++) {
+                  sat = (float)(Ia[color]/s[color]+(Jx[color]+Jy[color])/(sqrt(Jx[color]*Jx[color]+Jy[color]*Jy[color])+1.0e-20f));
+                  CV_MAT_3COLOR_ELEM(*out,uchar,i-1,j-1,color) = round_cast<uchar>(sat);
                }
 
                CV_MAT_ELEM(*f,uchar,i,j) = BAND;
@@ -411,7 +370,7 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -493,7 +452,7 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
                                     gradI.y=0;
                                  }
                               }
-                              Ia += (float)w * (float)(CV_MAT_ELEM(*out,data_type,km,lm));
+                              Ia += (float)w * (float)(CV_MAT_ELEM(*out,data_type,k-1,l-1));
                               Jx -= (float)w * (float)(gradI.x*r.x);
                               Jy -= (float)w * (float)(gradI.y*r.y);
                               s  += w;
@@ -501,9 +460,9 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
                         }
                      }
                   }
-                  sat = (float)((Ia/s+(Jx+Jy)/(sqrt(Jx*Jx+Jy*Jy)+1.0e-20f)+0.5f));
+                  sat = (float)(Ia/s+(Jx+Jy)/(sqrt(Jx*Jx+Jy*Jy)+1.0e-20f));
                   {
-                  CV_MAT_ELEM(*out,data_type,i-1,j-1) = cv::saturate_cast<data_type>(sat);
+                  CV_MAT_ELEM(*out,data_type,i-1,j-1) = round_cast<data_type>(sat);
                   }
                }
 
@@ -531,7 +490,7 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -540,17 +499,19 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
                            FastMarching_solve(i+1,j,i,j+1,f,t));
                CV_MAT_ELEM(*t,float,i,j) = dist;
 
-               for (color=0; color<=2; color++) {
-                  cv::Point2f gradI,r;
-                  float Ia=0,s=1.0e-20f,w,dst,dir;
+               cv::Point2f gradI,r;
+               float Ia[3]={0,0,0};
+               float s[3]={1.0e-20f,1.0e-20f,1.0e-20f};
+               float w,dst,dir;
 
-                  for (k=i-range; k<=i+range; k++) {
-                     int km=k-1+(k==1),kp=k-1-(k==f->rows-2);
-                     for (l=j-range; l<=j+range; l++) {
-                        int lm=l-1+(l==1),lp=l-1-(l==f->cols-2);
-                        if (k>0&&l>0&&k<f->rows-1&&l<f->cols-1) {
-                           if ((CV_MAT_ELEM(*f,uchar,k,l)!=INSIDE)&&
-                               ((l-j)*(l-j)+(k-i)*(k-i)<=range*range)) {
+               for (k=i-range; k<=i+range; k++) {
+                  int km=k-1+(k==1),kp=k-1-(k==f->rows-2);
+                  for (l=j-range; l<=j+range; l++) {
+                     int lm=l-1+(l==1),lp=l-1-(l==f->cols-2);
+                     if (k>0&&l>0&&k<f->rows-1&&l<f->cols-1) {
+                        if ((CV_MAT_ELEM(*f,uchar,k,l)!=INSIDE)&&
+                            ((l-j)*(l-j)+(k-i)*(k-i)<=range*range)) {
+                           for (color=0; color<=2; color++) {
                               r.y=(float)(k-i);
                               r.x=(float)(l-j);
 
@@ -594,13 +555,15 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
                                  dir = (float)fabs(VectorScalMult(r,gradI)/sqrt(VectorLength(r)*VectorLength(gradI)));
                               }
                               w = dst*dir;
-                              Ia += (float)w * (float)(CV_MAT_3COLOR_ELEM(*out,uchar,km,lm,color));
-                              s  += w;
+                              Ia[color] += (float)w * (float)(CV_MAT_3COLOR_ELEM(*out,uchar,k-1,l-1,color));
+                              s[color]  += w;
                            }
                         }
                      }
                   }
-                  CV_MAT_3COLOR_ELEM(*out,uchar,i-1,j-1,color) = cv::saturate_cast<uchar>((double)Ia/s);
+               }
+               for (color=0; color<=2; color++) {
+                  CV_MAT_3COLOR_ELEM(*out,uchar,i-1,j-1,color) = cv::saturate_cast<uchar>((double)Ia[color]/s[color]);
                }
 
                CV_MAT_ELEM(*f,uchar,i,j) = BAND;
@@ -619,7 +582,7 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -682,7 +645,7 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
                                  dir = (float)fabs(VectorScalMult(r,gradI)/sqrt(VectorLength(r)*VectorLength(gradI)));
                               }
                               w = dst*dir;
-                              Ia += (float)w * (float)(CV_MAT_ELEM(*out,data_type,km,lm));
+                              Ia += (float)w * (float)(CV_MAT_ELEM(*out,data_type,k-1,l-1));
                               s  += w;
                            }
                         }
@@ -723,17 +686,13 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
       }\
    }
 
-namespace cv {
-template<> struct DefaultDeleter<IplConvKernel>{ void operator ()(IplConvKernel* obj) const { cvReleaseStructuringElement(&obj); } };
-}
-
 static void
 icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_img,
            double inpaintRange, int flags )
 {
     cv::Ptr<CvMat> mask, band, f, t, out;
     cv::Ptr<CvPriorityQueueFloat> Heap, Out;
-    cv::Ptr<IplConvKernel> el_cross, el_range;
+    cv::Mat el_range, el_cross; // structuring elements for dilate
 
     CvMat input_hdr, mask_hdr, output_hdr;
     CvMat* input_img, *inpaint_mask, *output_img;
@@ -745,18 +704,18 @@ icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_
     output_img = cvGetMat( _output_img, &output_hdr );
 
     if( !CV_ARE_SIZES_EQ(input_img,output_img) || !CV_ARE_SIZES_EQ(input_img,inpaint_mask))
-        CV_Error( CV_StsUnmatchedSizes, "All the input and output images must have the same size" );
+        CV_Error( cv::Error::StsUnmatchedSizes, "All the input and output images must have the same size" );
 
     if( (CV_MAT_TYPE(input_img->type) != CV_8U &&
          CV_MAT_TYPE(input_img->type) != CV_16U &&
          CV_MAT_TYPE(input_img->type) != CV_32F &&
         CV_MAT_TYPE(input_img->type) != CV_8UC3) ||
         !CV_ARE_TYPES_EQ(input_img,output_img) )
-        CV_Error( CV_StsUnsupportedFormat,
+        CV_Error( cv::Error::StsUnsupportedFormat,
         "8-bit, 16-bit unsigned or 32-bit float 1-channel and 8-bit 3-channel input/output images are supported" );
 
     if( CV_MAT_TYPE(inpaint_mask->type) != CV_8UC1 )
-        CV_Error( CV_StsUnsupportedFormat, "The mask must be 8-bit 1-channel image" );
+        CV_Error( cv::Error::StsUnsupportedFormat, "The mask must be 8-bit 1-channel image" );
 
     range = MAX(range,1);
     range = MIN(range,100);
@@ -768,7 +727,7 @@ icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_
     t.reset(cvCreateMat(erows, ecols, CV_32FC1));
     band.reset(cvCreateMat(erows, ecols, CV_8UC1));
     mask.reset(cvCreateMat(erows, ecols, CV_8UC1));
-    el_cross.reset(cvCreateStructuringElementEx(3,3,1,1,CV_SHAPE_CROSS,NULL));
+    el_cross = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3), cv::Point(1, 1));
 
     cvCopy( input_img, output_img );
     cvSet(mask,cvScalar(KNOWN,0,0,0));
@@ -776,10 +735,8 @@ icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_
     SET_BORDER1_C1(mask,uchar,0);
     cvSet(f,cvScalar(KNOWN,0,0,0));
     cvSet(t,cvScalar(1.0e6f,0,0,0));
-    cvDilate(mask,band,el_cross,1);   // image with narrow band
+    cv::dilate(cv::cvarrToMat(mask), cv::cvarrToMat(band), el_cross, cv::Point(1, 1));
     Heap=cv::makePtr<CvPriorityQueueFloat>();
-    if (!Heap->Init(band))
-        return;
     cvSub(band,mask,band,NULL);
     SET_BORDER1_C1(band,uchar,0);
     if (!Heap->Add(band))
@@ -791,13 +748,10 @@ icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_
     if( flags == cv::INPAINT_TELEA )
     {
         out.reset(cvCreateMat(erows, ecols, CV_8UC1));
-        el_range.reset(cvCreateStructuringElementEx(2*range+1,2*range+1,
-            range,range,CV_SHAPE_RECT,NULL));
-        cvDilate(mask,out,el_range,1);
+        el_range = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(2 * range + 1, 2 * range + 1));
+        cv::dilate(cv::cvarrToMat(mask), cv::cvarrToMat(out), el_range);
         cvSub(out,mask,out,NULL);
         Out=cv::makePtr<CvPriorityQueueFloat>();
-        if (!Out->Init(out))
-            return;
         if (!Out->Add(band))
             return;
         cvSub(out,band,out,NULL);

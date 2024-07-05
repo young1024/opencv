@@ -27,7 +27,7 @@ bool is_byte_order_swapped(double scale)
   #endif
 }
 
-void swap_endianess(uint32_t& ui)
+void swap_endianness(uint32_t& ui)
 {
   static const uint32_t A(0x000000ffU);
   static const uint32_t B(0x0000ff00U);
@@ -47,7 +47,7 @@ template<> double atoT<double>(const std::string& s) { return std::atof(s.c_str(
 template<typename T>
 T read_number(cv::RLByteStream& strm)
 {
-  // should be enogh to take string representation of any number
+  // should be enough to take string representation of any number
   const size_t buffer_size = 2048;
 
   std::vector<char> buffer(buffer_size, 0);
@@ -137,12 +137,12 @@ bool PFMDecoder::readData(Mat& mat)
       for (int i = 0; i < m_width * buffer.channels(); ++i) {
         static_assert( sizeof(uint32_t) == sizeof(float),
                        "uint32_t and float must have same size." );
-        swap_endianess(buffer.ptr<uint32_t>(y)[i]);
+        swap_endianness(buffer.ptr<uint32_t>(y)[i]);
       }
     }
   }
 
-  if (buffer.channels() == 3) {
+  if (buffer.channels() == 3 && !m_use_rgb) {
     cv::cvtColor(buffer, buffer, cv::COLOR_BGR2RGB);
   }
 

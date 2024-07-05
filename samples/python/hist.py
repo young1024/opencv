@@ -18,8 +18,8 @@ Abid Rahman 3/14/12 debug Gary Bradski
 # Python 2/3 compatibility
 from __future__ import print_function
 
-import cv2 as cv
 import numpy as np
+import cv2 as cv
 
 bins = np.arange(256).reshape(256,1)
 
@@ -46,15 +46,14 @@ def hist_lines(im):
         im = cv.cvtColor(im,cv.COLOR_BGR2GRAY)
     hist_item = cv.calcHist([im],[0],None,[256],[0,256])
     cv.normalize(hist_item,hist_item,0,255,cv.NORM_MINMAX)
-    hist=np.int32(np.around(hist_item))
+    hist = np.int32(np.around(hist_item))
     for x,y in enumerate(hist):
-        cv.line(h,(x,0),(x,y),(255,255,255))
+        cv.line(h,(x,0),(x,y[0]),(255,255,255))
     y = np.flipud(h)
     return y
 
 
-if __name__ == '__main__':
-
+def main():
     import sys
 
     if len(sys.argv)>1:
@@ -77,7 +76,7 @@ if __name__ == '__main__':
     a - show histogram for color image in curve mode \n
     b - show histogram in bin mode \n
     c - show equalized histogram (always in bin mode) \n
-    d - show histogram for color image in curve mode \n
+    d - show histogram for gray image in curve mode \n
     e - show histogram for a normalized image in curve mode \n
     Esc - exit \n
     ''')
@@ -116,4 +115,11 @@ if __name__ == '__main__':
             print('ESC')
             cv.destroyAllWindows()
             break
+
+    print('Done')
+
+
+if __name__ == '__main__':
+    print(__doc__)
+    main()
     cv.destroyAllWindows()

@@ -1,5 +1,8 @@
 #!/usr/bin/env python
+""" Parse XML test log file.
 
+This module serves as utility for other scripts.
+"""
 from __future__ import print_function
 import collections
 import re
@@ -30,7 +33,8 @@ class TestInfo(object):
             self.status = xmlnode.getAttribute("status")
 
         if self.name.startswith("DISABLED_"):
-            self.status = "disabled"
+            if self.status == 'notrun':
+                self.status = "disabled"
             self.fixture = self.fixture.replace("DISABLED_", "")
             self.name = self.name.replace("DISABLED_", "")
         self.properties = {
@@ -51,6 +55,7 @@ class TestInfo(object):
         self.parseLongMetric(xmlnode, "stddev");
         self.parseFloatMetric(xmlnode, "gstddev");
         self.parseFloatMetric(xmlnode, "time");
+        self.parseLongMetric(xmlnode, "total_memory_usage");
 
     def parseLongMetric(self, xmlnode, name, default = 0):
         if name in self.properties:
@@ -180,9 +185,12 @@ class TestInfo(object):
                 return 1
         return 0
 
+    def __lt__(self, other):
+        return self.__cmp__(other) == -1
+
 # This is a Sequence for compatibility with old scripts,
 # which treat parseLogFile's return value as a list.
-class TestRunInfo(collections.Sequence):
+class TestRunInfo(object):
     def __init__(self, properties, tests):
         self.properties = properties
         self.tests = tests

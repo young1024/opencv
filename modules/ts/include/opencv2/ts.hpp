@@ -37,6 +37,7 @@
 #include <iterator>
 #include <limits>
 #include <algorithm>
+#include <set>
 
 
 #ifndef OPENCV_32BIT_CONFIGURATION
@@ -50,6 +51,44 @@
 #   undef OPENCV_32BIT_CONFIGURATION
 # endif
 #endif
+
+
+
+// most part of OpenCV tests are fit into 200Mb limit, but some tests are not:
+// Note: due memory fragmentation real limits are usually lower on 20-25% (400Mb memory usage goes into mem_1Gb class)
+#define CV_TEST_TAG_MEMORY_512MB "mem_512mb"     // used memory: 200..512Mb - enabled by default
+#define CV_TEST_TAG_MEMORY_1GB "mem_1gb"         // used memory: 512Mb..1Gb - enabled by default
+#define CV_TEST_TAG_MEMORY_2GB "mem_2gb"         // used memory: 1..2Gb - enabled by default on 64-bit configuration (32-bit - disabled)
+#define CV_TEST_TAG_MEMORY_6GB "mem_6gb"         // used memory: 2..6Gb - disabled by default
+#define CV_TEST_TAG_MEMORY_14GB "mem_14gb"       // used memory: 6..14Gb - disabled by default
+
+// Large / huge video streams or complex workloads
+#define CV_TEST_TAG_LONG "long"                  // 5+ seconds on modern desktop machine (single thread)
+#define CV_TEST_TAG_VERYLONG "verylong"          // 20+ seconds on modern desktop machine (single thread)
+
+// Large / huge video streams or complex workloads for debug builds
+#define CV_TEST_TAG_DEBUG_LONG "debug_long"           // 10+ seconds on modern desktop machine (single thread)
+#define CV_TEST_TAG_DEBUG_VERYLONG "debug_verylong"   // 40+ seconds on modern desktop machine (single thread)
+
+// Lets skip processing of high resolution images via instrumentation tools (valgrind/coverage/sanitizers).
+// It is enough to run lower resolution (VGA: 640x480) tests.
+#define CV_TEST_TAG_SIZE_HD "size_hd"            // 720p+, enabled
+#define CV_TEST_TAG_SIZE_FULLHD "size_fullhd"    // 1080p+, enabled (disable these tests for valgrind/coverage run)
+#define CV_TEST_TAG_SIZE_4K "size_4k"            // 2160p+, enabled (disable these tests for valgrind/coverage run)
+
+// Other misc test tags
+#define CV_TEST_TAG_TYPE_64F "type_64f"          // CV_64F, enabled (disable these tests on low power embedded devices)
+
+// Kernel-based image processing
+#define CV_TEST_TAG_FILTER_SMALL "filter_small"       // Filtering with kernels <= 3x3
+#define CV_TEST_TAG_FILTER_MEDIUM "filter_medium"     // Filtering with kernels: 3x3 < kernel <= 5x5
+#define CV_TEST_TAG_FILTER_LARGE "filter_large"       // Filtering with kernels: 5x5 < kernel <= 9x9
+#define CV_TEST_TAG_FILTER_HUGE "filter_huge"         // Filtering with kernels: > 9x9
+
+// Other tests categories
+#define CV_TEST_TAG_OPENCL "opencl"              // Tests with OpenCL
+
+
 
 #ifdef WINRT
     #pragma warning(disable:4447) // Disable warning 'main' signature found without threading model
@@ -77,16 +116,21 @@
 # endif
 #endif
 
-#if defined(__OPENCV_BUILD) && defined(__clang__)
-#pragma clang diagnostic ignored "-Winconsistent-missing-override"
-#endif
 #if defined(__OPENCV_BUILD) && defined(__GNUC__) && __GNUC__ >= 5
 //#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsuggest-override"
 #endif
+#if defined(__OPENCV_BUILD) && defined(__clang__) && ((__clang_major__*100 + __clang_minor__) >= 1301)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-copy"
+#pragma clang diagnostic ignored "-Winconsistent-missing-override"
+#endif
 #include "opencv2/ts/ts_gtest.h"
 #if defined(__OPENCV_BUILD) && defined(__GNUC__) && __GNUC__ >= 5
 //#pragma GCC diagnostic pop
+#endif
+#if defined(__OPENCV_BUILD) && defined(__clang__) && ((__clang_major__*100 + __clang_minor__) >= 1301)
+#pragma clang diagnostic pop
 #endif
 #include "opencv2/ts/ts_ext.hpp"
 
@@ -142,13 +186,78 @@ using testing::tuple_size;
 using testing::tuple_element;
 
 
-class SkipTestException: public cv::Exception
+namespace details {
+class SkipTestExceptionBase: public cv::Exception
+{
+public:
+    SkipTestExceptionBase(bool handlingTags);
+    SkipTestExceptionBase(const cv::String& message, bool handlingTags);
+};
+}
+
+class SkipTestException: public details::SkipTestExceptionBase
 {
 public:
     int dummy; // workaround for MacOSX Xcode 7.3 bug (don't make class "empty")
-    SkipTestException() : dummy(0) {}
-    SkipTestException(const cv::String& message) : dummy(0) { this->msg = message; }
+    SkipTestException() : details::SkipTestExceptionBase(false), dummy(0) {}
+    SkipTestException(const cv::String& message) : details::SkipTestExceptionBase(message, false), dummy(0) { }
 };
+
+/** Apply tag to the current test
+
+Automatically apply corresponding additional tags (for example, 4K => FHD => HD => VGA).
+
+If tag is in skip list, then SkipTestException is thrown
+*/
+void applyTestTag(const std::string& tag);
+
+/** Run postponed checks of applied test tags
+
+If tag is in skip list, then SkipTestException is thrown
+*/
+void checkTestTags();
+
+void applyTestTag_(const std::string& tag);
+
+static inline void applyTestTag(const std::string& tag1, const std::string& tag2)
+{ applyTestTag_(tag1); applyTestTag_(tag2); checkTestTags(); }
+static inline void applyTestTag(const std::string& tag1, const std::string& tag2, const std::string& tag3)
+{ applyTestTag_(tag1); applyTestTag_(tag2); applyTestTag_(tag3); checkTestTags(); }
+static inline void applyTestTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4)
+{ applyTestTag_(tag1); applyTestTag_(tag2); applyTestTag_(tag3); applyTestTag_(tag4); checkTestTags(); }
+static inline void applyTestTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4, const std::string& tag5)
+{ applyTestTag_(tag1); applyTestTag_(tag2); applyTestTag_(tag3); applyTestTag_(tag4); applyTestTag_(tag5); checkTestTags(); }
+
+
+/** Append global skip test tags
+*/
+void registerGlobalSkipTag(const std::string& skipTag);
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2)
+{ registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); }
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2, const std::string& tag3)
+{ registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); registerGlobalSkipTag(tag3); }
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4)
+{ registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); registerGlobalSkipTag(tag3); registerGlobalSkipTag(tag4); }
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4,
+    const std::string& tag5)
+{
+    registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); registerGlobalSkipTag(tag3); registerGlobalSkipTag(tag4);
+    registerGlobalSkipTag(tag5);
+}
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4,
+    const std::string& tag5, const std::string& tag6)
+{
+    registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); registerGlobalSkipTag(tag3); registerGlobalSkipTag(tag4);
+    registerGlobalSkipTag(tag5); registerGlobalSkipTag(tag6);
+}
+static inline void registerGlobalSkipTag(const std::string& tag1, const std::string& tag2, const std::string& tag3, const std::string& tag4,
+    const std::string& tag5, const std::string& tag6, const std::string& tag7)
+{
+    registerGlobalSkipTag(tag1); registerGlobalSkipTag(tag2); registerGlobalSkipTag(tag3); registerGlobalSkipTag(tag4);
+    registerGlobalSkipTag(tag5); registerGlobalSkipTag(tag6); registerGlobalSkipTag(tag7);
+}
+
+
 
 class TS;
 
@@ -191,8 +300,8 @@ Mat randomMat(RNG& rng, Size size, int type, double minVal, double maxVal, bool 
 Mat randomMat(RNG& rng, const vector<int>& size, int type, double minVal, double maxVal, bool useRoi);
 void add(const Mat& a, double alpha, const Mat& b, double beta,
                       Scalar gamma, Mat& c, int ctype, bool calcAbs=false);
-void multiply(const Mat& a, const Mat& b, Mat& c, double alpha=1);
-void divide(const Mat& a, const Mat& b, Mat& c, double alpha=1);
+void multiply(const Mat& a, const Mat& b, Mat& c, double alpha=1, int ctype=-1);
+void divide(const Mat& a, const Mat& b, Mat& c, double alpha=1, int ctype=-1);
 
 void convert(const Mat& src, cv::OutputArray dst, int dtype, double alpha=1, double beta=0);
 void copy(const Mat& src, Mat& dst, const Mat& mask=Mat(), bool invertMask=false);
@@ -223,6 +332,7 @@ Mat calcSobelKernel2D( int dx, int dy, int apertureSize, int origin=0 );
 Mat calcLaplaceKernel2D( int aperture_size );
 
 void initUndistortMap( const Mat& a, const Mat& k, const Mat& R, const Mat& new_a, Size sz, Mat& mapx, Mat& mapy, int map_type );
+void initInverseRectificationMap( const Mat& a, const Mat& k, const Mat& R, const Mat& new_a, Size sz, Mat& mapx, Mat& mapy, int map_type );
 
 void minMaxLoc(const Mat& src, double* minval, double* maxval,
                           vector<int>* minloc, vector<int>* maxloc, const Mat& mask=Mat());
@@ -335,6 +445,9 @@ protected:
 
     // updates progress bar
     virtual int update_progress( int progress, int test_case_idx, int count, double dt );
+
+    // dump test case input parameters
+    virtual void dump_test_case(int test_case_idx, std::ostream* out);
 
     // finds test parameter
     cv::FileNode find_param( const cv::FileStorage& fs, const char* param_name );
@@ -498,7 +611,7 @@ public:
     };
 
     // get RNG to generate random input data for a test
-    RNG& get_rng() { return rng; }
+    RNG& get_rng() { return cv::theRNG(); }
 
     // returns the current error code
     TS::FailureCode get_err_code() { return TS::FailureCode(current_test_info.code); }
@@ -516,7 +629,6 @@ public:
 protected:
 
     // these are allocated within a test to try to keep them valid in case of stack corruption
-    RNG rng;
 
     // information about the current test
     TestInfo current_test_info;
@@ -696,7 +808,7 @@ int main(int argc, char **argv) \
 { \
     CV_TRACE_FUNCTION(); \
     { CV_TRACE_REGION("INIT"); \
-    using namespace cvtest; \
+    using namespace cvtest; using namespace opencv_test; \
     TS* ts = TS::ptr(); \
     ts->init(resourcesubdir); \
     __CV_TEST_EXEC_ARGS(CV_TEST_INIT0_ ## INIT0) \
@@ -828,13 +940,9 @@ namespace opencv_test {
 using namespace cvtest;
 using namespace cv;
 
-#ifdef CV_CXX11
 #define CVTEST_GUARD_SYMBOL(name) \
     class required_namespace_specificatin_here_for_symbol_ ## name {}; \
     using name = required_namespace_specificatin_here_for_symbol_ ## name;
-#else
-#define CVTEST_GUARD_SYMBOL(name) /* nothing */
-#endif
 
 CVTEST_GUARD_SYMBOL(norm)
 CVTEST_GUARD_SYMBOL(add)

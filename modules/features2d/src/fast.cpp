@@ -47,6 +47,7 @@ The references are:
 #include "opencl_kernels_features2d.hpp"
 #include "hal_replacement.hpp"
 #include "opencv2/core/hal/intrin.hpp"
+#include "opencv2/core/utils/buffer_area.private.hpp"
 
 #include "opencv2/core/openvx/ovx_defs.hpp"
 
@@ -64,7 +65,6 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
 #if CV_SIMD128
     const int quarterPatternSize = patternSize/4;
     v_uint8x16 delta = v_setall_u8(0x80), t = v_setall_u8((char)threshold), K16 = v_setall_u8((char)K);
-    bool hasSimd = hasSIMD128();
 #if CV_TRY_AVX2
     Ptr<opt_AVX2::FAST_t_patternSize16_AVX2> fast_t_impl_avx2;
     if(CV_CPU_HAS_SUPPORT_AVX2)
@@ -81,20 +81,26 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
     for( i = -255; i <= 255; i++ )
         threshold_tab[i+255] = (uchar)(i < -threshold ? 1 : i > threshold ? 2 : 0);
 
-    AutoBuffer<uchar> _buf((img.cols+16)*3*(sizeof(int) + sizeof(uchar)) + 128);
-    uchar* buf[3];
-    buf[0] = _buf.data(); buf[1] = buf[0] + img.cols; buf[2] = buf[1] + img.cols;
-    int* cpbuf[3];
-    cpbuf[0] = (int*)alignPtr(buf[2] + img.cols, sizeof(int)) + 1;
-    cpbuf[1] = cpbuf[0] + img.cols + 1;
-    cpbuf[2] = cpbuf[1] + img.cols + 1;
-    memset(buf[0], 0, img.cols*3);
+    uchar* buf[3] = { 0 };
+    int* cpbuf[3] = { 0 };
+    utils::BufferArea area;
+    for (unsigned idx = 0; idx < 3; ++idx)
+    {
+        area.allocate(buf[idx], img.cols);
+        area.allocate(cpbuf[idx], img.cols + 1);
+    }
+    area.commit();
+
+    for (unsigned idx = 0; idx < 3; ++idx)
+    {
+        memset(buf[idx], 0, img.cols);
+    }
 
     for(i = 3; i < img.rows-2; i++)
     {
         const uchar* ptr = img.ptr<uchar>(i) + 3;
         uchar* curr = buf[(i - 3)%3];
-        int* cornerpos = cpbuf[(i - 3)%3];
+        int* cornerpos = cpbuf[(i - 3)%3] + 1; // cornerpos[-1] is used to store a value
         memset(curr, 0, img.cols);
         int ncorners = 0;
 
@@ -102,7 +108,6 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
         {
             j = 3;
 #if CV_SIMD128
-            if( hasSimd )
             {
                 if( patternSize == 16 )
                 {
@@ -115,8 +120,8 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
                         for (; j < img.cols - 16 - 3; j += 16, ptr += 16)
                         {
                             v_uint8x16 v = v_load(ptr);
-                            v_int8x16 v0 = v_reinterpret_as_s8((v + t) ^ delta);
-                            v_int8x16 v1 = v_reinterpret_as_s8((v - t) ^ delta);
+                            v_int8x16 v0 = v_reinterpret_as_s8(v_xor(v_add(v, t), delta));
+                            v_int8x16 v1 = v_reinterpret_as_s8(v_xor(v_sub(v, t), delta));
 
                             v_int8x16 x0 = v_reinterpret_as_s8(v_sub_wrap(v_load(ptr + pixel[0]), delta));
                             v_int8x16 x1 = v_reinterpret_as_s8(v_sub_wrap(v_load(ptr + pixel[quarterPatternSize]), delta));
@@ -124,20 +129,19 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
                             v_int8x16 x3 = v_reinterpret_as_s8(v_sub_wrap(v_load(ptr + pixel[3*quarterPatternSize]), delta));
 
                             v_int8x16 m0, m1;
-                            m0 = (v0 < x0) & (v0 < x1);
-                            m1 = (x0 < v1) & (x1 < v1);
-                            m0 = m0 | ((v0 < x1) & (v0 < x2));
-                            m1 = m1 | ((x1 < v1) & (x2 < v1));
-                            m0 = m0 | ((v0 < x2) & (v0 < x3));
-                            m1 = m1 | ((x2 < v1) & (x3 < v1));
-                            m0 = m0 | ((v0 < x3) & (v0 < x0));
-                            m1 = m1 | ((x3 < v1) & (x0 < v1));
-                            m0 = m0 | m1;
+                            m0 = v_and(v_lt(v0, x0), v_lt(v0, x1));
+                            m1 = v_and(v_lt(x0, v1), v_lt(x1, v1));
+                            m0 = v_or(m0, v_and(v_lt(v0, x1), v_lt(v0, x2)));
+                            m1 = v_or(m1, v_and(v_lt(x1, v1), v_lt(x2, v1)));
+                            m0 = v_or(m0, v_and(v_lt(v0, x2), v_lt(v0, x3)));
+                            m1 = v_or(m1, v_and(v_lt(x2, v1), v_lt(x3, v1)));
+                            m0 = v_or(m0, v_and(v_lt(v0, x3), v_lt(v0, x0)));
+                            m1 = v_or(m1, v_and(v_lt(x3, v1), v_lt(x0, v1)));
+                            m0 = v_or(m0, m1);
 
-                            int mask = v_signmask(m0);
-                            if( mask == 0 )
+                            if( !v_check_any(m0) )
                                 continue;
-                            if( (mask & 255) == 0 )
+                            if( !v_check_any(v_combine_low(m0, m0)) )
                             {
                                 j -= 8;
                                 ptr -= 8;
@@ -150,27 +154,44 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
                             v_uint8x16 max1 = v_setzero_u8();
                             for( k = 0; k < N; k++ )
                             {
-                                v_int8x16 x = v_reinterpret_as_s8(v_load((ptr + pixel[k])) ^ delta);
-                                m0 = v0 < x;
-                                m1 = x < v1;
+                                v_int8x16 x = v_reinterpret_as_s8(v_xor(v_load((ptr + pixel[k])), delta));
+                                m0 = v_lt(v0, x);
+                                m1 = v_lt(x, v1);
 
-                                c0 = v_sub_wrap(c0, m0) & m0;
-                                c1 = v_sub_wrap(c1, m1) & m1;
+                                c0 = v_and(v_sub_wrap(c0, m0), m0);
+                                c1 = v_and(v_sub_wrap(c1, m1), m1);
 
                                 max0 = v_max(max0, v_reinterpret_as_u8(c0));
                                 max1 = v_max(max1, v_reinterpret_as_u8(c1));
                             }
 
-                            max0 = v_max(max0, max1);
-                            int m = v_signmask(K16 < max0);
+                            max0 = v_lt(K16, v_max(max0, max1));
+                            unsigned int m = v_signmask(v_reinterpret_as_s8(max0));
 
                             for( k = 0; m > 0 && k < 16; k++, m >>= 1 )
                             {
-                                if(m & 1)
+                                if( m & 1 )
                                 {
                                     cornerpos[ncorners++] = j+k;
                                     if(nonmax_suppression)
-                                        curr[j+k] = (uchar)cornerScore<patternSize>(ptr+k, pixel, threshold);
+                                    {
+                                        short d[25];
+                                        for (int _k = 0; _k < 25; _k++)
+                                            d[_k] = (short)(ptr[k] - ptr[k + pixel[_k]]);
+
+                                        v_int16x8 a0, b0, a1, b1;
+                                        a0 = b0 = a1 = b1 = v_load(d + 8);
+                                        for(int shift = 0; shift < 8; ++shift)
+                                        {
+                                            v_int16x8 v_nms = v_load(d + shift);
+                                            a0 = v_min(a0, v_nms);
+                                            b0 = v_max(b0, v_nms);
+                                            v_nms = v_load(d + 9 + shift);
+                                            a1 = v_min(a1, v_nms);
+                                            b1 = v_max(b1, v_nms);
+                                        }
+                                        curr[j + k] = (uchar)(v_reduce_max(v_max(v_max(a0, a1), v_sub(v_setzero_s16(), v_min(b0, b1)))) - 1);
+                                    }
                                 }
                             }
                         }
@@ -252,7 +273,7 @@ void FAST_t(InputArray _img, std::vector<KeyPoint>& keypoints, int threshold, bo
 
         const uchar* prev = buf[(i - 4 + 3)%3];
         const uchar* pprev = buf[(i - 5 + 3)%3];
-        cornerpos = cpbuf[(i - 4 + 3)%3];
+        cornerpos = cpbuf[(i - 4 + 3)%3] + 1; // cornerpos[-1] is used to store a value
         ncorners = cornerpos[-1];
 
         for( k = 0; k < ncorners; k++ )
@@ -517,6 +538,27 @@ public:
     FastFeatureDetector_Impl( int _threshold, bool _nonmaxSuppression, FastFeatureDetector::DetectorType _type )
     : threshold(_threshold), nonmaxSuppression(_nonmaxSuppression), type(_type)
     {}
+
+    void read( const FileNode& fn) CV_OVERRIDE
+    {
+      // if node is empty, keep previous value
+      if (!fn["threshold"].empty())
+        fn["threshold"] >> threshold;
+      if (!fn["nonmaxSuppression"].empty())
+        fn["nonmaxSuppression"] >> nonmaxSuppression;
+      if (!fn["type"].empty())
+        fn["type"] >> type;
+    }
+    void write( FileStorage& fs) const CV_OVERRIDE
+    {
+      if(fs.isOpened())
+      {
+        fs << "name" << getDefaultName();
+        fs << "threshold" << threshold;
+        fs << "nonmaxSuppression" << nonmaxSuppression;
+        fs << "type" << type;
+      }
+    }
 
     void detect( InputArray _image, std::vector<KeyPoint>& keypoints, InputArray _mask ) CV_OVERRIDE
     {

@@ -15,7 +15,7 @@ histograms**.
 **What is it actually in simple words?** It is used for image segmentation or finding objects of
 interest in an image. In simple words, it creates an image of the same size (but single channel) as
 that of our input image, where each pixel corresponds to the probability of that pixel belonging to
-our object. In more simpler worlds, the output image will have our object of interest in more white
+our object. In more simpler words, the output image will have our object of interest in more white
 compared to remaining part. Well, that is an intuitive explanation. (I can't make it more simpler).
 Histogram Backprojection is used with camshift algorithm etc.
 
@@ -38,10 +38,12 @@ import cv2 as cvfrom matplotlib import pyplot as plt
 
 #roi is the object or region of object we need to find
 roi = cv.imread('rose_red.png')
+assert roi is not None, "file could not be read, check with os.path.exists()"
 hsv = cv.cvtColor(roi,cv.COLOR_BGR2HSV)
 
 #target is the image we search in
 target = cv.imread('rose.png')
+assert target is not None, "file could not be read, check with os.path.exists()"
 hsvt = cv.cvtColor(target,cv.COLOR_BGR2HSV)
 
 # Find the histograms using calcHist. Can be done with np.histogram2d also
@@ -85,9 +87,11 @@ import numpy as np
 import cv2 as cv
 
 roi = cv.imread('rose_red.png')
+assert roi is not None, "file could not be read, check with os.path.exists()"
 hsv = cv.cvtColor(roi,cv.COLOR_BGR2HSV)
 
 target = cv.imread('rose.png')
+assert target is not None, "file could not be read, check with os.path.exists()"
 hsvt = cv.cvtColor(target,cv.COLOR_BGR2HSV)
 
 # calculating object histogram

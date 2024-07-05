@@ -25,6 +25,7 @@ from __future__ import print_function
 
 import numpy as np
 import cv2 as cv
+
 import video
 from common import draw_str
 from video import presets
@@ -76,8 +77,8 @@ class App:
 
                 for (x0, y0), (x1, y1), good in zip(self.p0[:,0], self.p1[:,0], status[:,0]):
                     if good:
-                        cv.line(vis, (x0, y0), (x1, y1), (0, 128, 0))
-                    cv.circle(vis, (x1, y1), 2, (red, green)[good], -1)
+                        cv.line(vis, (int(x0), int(y0)), (int(x1), int(y1)), (0, 128, 0))
+                    cv.circle(vis, (int(x1), int(y1)), 2, (red, green)[good], -1)
                 draw_str(vis, (20, 20), 'track count: %d' % len(self.p1))
                 if self.use_ransac:
                     draw_str(vis, (20, 40), 'RANSAC')
@@ -85,7 +86,7 @@ class App:
                 p = cv.goodFeaturesToTrack(frame_gray, **feature_params)
                 if p is not None:
                     for x, y in p[:,0]:
-                        cv.circle(vis, (x, y), 2, green, -1)
+                        cv.circle(vis, (int(x), int(y)), 2, green, -1)
                     draw_str(vis, (20, 20), 'feature count: %d' % len(p))
 
             cv.imshow('lk_homography', vis)
@@ -112,9 +113,11 @@ def main():
     except:
         video_src = 0
 
-    print(__doc__)
     App(video_src).run()
-    cv.destroyAllWindows()
+    print('Done')
+
 
 if __name__ == '__main__':
+    print(__doc__)
     main()
+    cv.destroyAllWindows()

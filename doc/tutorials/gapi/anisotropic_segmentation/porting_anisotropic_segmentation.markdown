@@ -1,5 +1,8 @@
 # Porting anisotropic image segmentation on G-API {#tutorial_gapi_anisotropic_segmentation}
 
+@prev_tutorial{tutorial_gapi_interactive_face_detection}
+@next_tutorial{tutorial_gapi_face_beautification}
+
 [TOC]
 
 # Introduction {#gapi_anisotropic_intro}
@@ -39,7 +42,7 @@ With G-API, we can define it as follows:
 It is important to understand that the new G-API based version of
 calcGST() will just produce a compute graph, in contrast to its
 original version, which actually calculates the values. This is a
-principial difference -- G-API based functions like this are used to
+principal difference -- G-API based functions like this are used to
 construct graphs, not to process the actual data.
 
 Let's start implementing calcGST() with calculation of \f$J\f$
@@ -106,9 +109,7 @@ like this:
 
 Note that this code slightly changes from the original one: forming up
 the resulting image is also a part of the pipeline (done with
-cv::gapi::addWeighted). Normalization of orientation and coherency
-images is still done by traditional OpenCV (using cv::normalize) as
-G-API doesn't provide such kernel at the moment.
+cv::gapi::addWeighted).
 
 Result of this G-API pipeline bit-exact matches the original one
 (given the same input image):
@@ -141,7 +142,7 @@ being a Graph API, doesn't force its users to do that.
 However, a graph is still built implicitly when a cv::GComputation
 object is defined. It may be useful to inspect how the resulting graph
 looks like to check if it is generated correctly and if it really
-represents our alrogithm. It is also useful to learn the structure of
+represents our algorithm. It is also useful to learn the structure of
 the graph to see if it has any redundancies.
 
 G-API allows to dump generated graphs to `.dot` files which then
@@ -155,11 +156,11 @@ file name before running the application, e.g.:
 
     $ GRAPH_DUMP_PATH=segm.dot ./bin/example_tutorial_porting_anisotropic_image_segmentation_gapi
 
-Now this file can be visalized with a `dot` command like this:
+Now this file can be visualized with a `dot` command like this:
 
     $ dot segm.dot -Tpng -o segm.png
 
-or viewed instantly with `xdot` command (please refer to your
+or viewed interactively with `xdot` (please refer to your
 distribution/operating system documentation on how to install these
 packages).
 
@@ -188,7 +189,7 @@ is also OpenCV-based since it fallbacks to OpenCV functions inside.
 
 On GNU/Linux, application memory footprint can be profiled with
 [Valgrind](http://valgrind.org/). On Debian/Ubuntu systems it can be
-installed like this (assuming you have administrator priveleges):
+installed like this (assuming you have administrator privileges):
 
     $ sudo apt-get install valgrind massif-visualizer
 
@@ -211,7 +212,7 @@ algorithm versions:
     ==6117==
 
 Once done, we can inspect the collected profiles with
-[Massif Visualizer](@https://github.com/KDE/massif-visualizer)
+[Massif Visualizer](https://github.com/KDE/massif-visualizer)
 (installed in the above step).
 
 Below is the visualized memory profile of the original OpenCV version
@@ -231,7 +232,7 @@ Now let's have a look on the profile of G-API version:
 Once G-API computation is created and its execution starts, G-API
 allocates all required memory at once and then the memory profile
 remains flat until the termination of the program. Massif reports us
-peak memory consumption of 10.6 MiB.
+peak memory consumption of 11.4 MiB.
 
 A reader may ask a right question at this point -- is G-API that bad?
 What is the reason in using it than?
@@ -241,10 +242,10 @@ consumption is because the default naive OpenCV-based backend is used to
 execute this graph. This backend serves mostly for quick prototyping
 and debugging algorithms before offload/further optimization.
 
-This backend doesn't utilize any complex memory mamagement strategies yet
+This backend doesn't utilize any complex memory management strategies yet
 since it is not its point at the moment. In the following chapter,
 we'll learn about Fluid backend and see how the same G-API code can
-run in a completely different model (and the footprint shrinked to a
+run in a completely different model (and the footprint shrunk to a
 number of kilobytes).
 
 # Backends and kernels {#gapi_anisotropic_backends}
@@ -294,13 +295,13 @@ and specify it to G-API:
 
 In G-API, kernels (or operation implementations) are objects. Kernels are
 organized into collections, or _kernel packages_, represented by class
-cv::gapi::GKernelPackage. The main purpose of a kernel package is to
+cv::GKernelPackage. The main purpose of a kernel package is to
 capture which kernels we would like to use in our graph, and pass it
 as a _graph compilation option_:
 
 @snippet cpp/tutorial_code/gapi/porting_anisotropic_image_segmentation/porting_anisotropic_image_segmentation_gapi_fluid.cpp kernel_pkg_use
 
-Traditional OpenCV is logically divided into modules, whith every
+Traditional OpenCV is logically divided into modules, with every
 module providing a set of functions. In G-API, there are also
 "modules" which are represented as kernel packages provided by a
 particular backend. In this example, we pass Fluid kernel packages to
@@ -308,24 +309,16 @@ G-API to utilize appropriate Fluid functions in our graph.
 
 Kernel packages are combinable -- in the above example, we take "Core"
 and "ImgProc" Fluid kernel packages and combine it into a single
-one. See documentation reference on cv::gapi::combine and
-cv::unite_policy on package combination options.
+one. See documentation reference on cv::gapi::combine.
 
 If no kernel packages are specified in options, G-API is using
 _default_ package which consists of default OpenCV implementations and
 thus G-API graphs are executed via OpenCV functions by default. OpenCV
 backend provides broader functional coverage than any other
 backend. If a kernel package is specified, like in this example, then
-it is being combined with the _default_ one with
-cv::unite_policy::REPLACE. It means that user-specified
-implementations will replace default implementations in case of
+it is being combined with the _default_.
+It means that user-specified implementations will replace default implementations in case of
 conflict.
-
-Kernel packages may contain a mix of kernels, in particular, multiple
-implementations of the same kernel. For example, a single kernel
-package may contain both OpenCV and Fluid implementations of kernel
-"Filter2D". In this case, the implementation selection preference can
-be specified with a special compilation parameter cv::gapi::lookup_order.
 
 <!-- FIXME Document this process better as a part of regular -->
 <!-- documentation, not a tutorial kind of thing -->
@@ -367,9 +360,9 @@ Fluid backend. Now it looks like this:
 
 ![Memory profile: G-API/Fluid port of Anisotropic Image Segmentation sample](pics/massif_export_gapi_fluid.png)
 
-Now the tool reports 3.8MiB -- and we just changed a few lines in our
-code, without modifying the graph itself! It is a ~2.8X improvement of
-the previous G-API result, and 2X improvement of the original OpenCV
+Now the tool reports 4.7MiB -- and we just changed a few lines in our
+code, without modifying the graph itself! It is a ~2.4X improvement of
+the previous G-API result, and ~1.6X improvement of the original OpenCV
 version.
 
 Let's also examine how the internal representation of the graph now
@@ -378,14 +371,14 @@ visualization like this:
 
 ![Anisotropic image segmentation graph with OpenCV & Fluid kernels](pics/segm_fluid.gif)
 
-This graph doesn't differ structually from its previous version (in
+This graph doesn't differ structurally from its previous version (in
 terms of operations and data objects), though a changed layout (on the
 left side of the dump) is easily noticeable.
 
 The visualization reflects how G-API deals with mixed graphs, also
 called _heterogeneous_ graphs. The majority of operations in this
 graph are implemented with Fluid backend, but Box filters are executed
-by the OpenCV backend. One can easily see that the graph is partioned
+by the OpenCV backend. One can easily see that the graph is partitioned
 (with rectangles). G-API groups connected operations based on their
 affinity, forming _subgraphs_ (or _islands_ in G-API terminology), and
 our top-level graph becomes a composition of multiple smaller

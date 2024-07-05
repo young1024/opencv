@@ -9,8 +9,9 @@ if PY3:
     xrange = range
 
 import numpy as np
-from numpy import random
 import cv2 as cv
+
+from numpy import random
 
 def make_gaussians(cluster_n, img_size):
     points = []
@@ -27,14 +28,14 @@ def make_gaussians(cluster_n, img_size):
     return points, ref_distrs
 
 def draw_gaussain(img, mean, cov, color):
-    x, y = np.int32(mean)
+    x, y = mean
     w, u, _vt = cv.SVDecomp(cov)
     ang = np.arctan2(u[1, 0], u[0, 0])*(180/np.pi)
     s1, s2 = np.sqrt(w)*3.0
-    cv.ellipse(img, (x, y), (s1, s2), ang, 0, 360, color, 1, cv.LINE_AA)
+    cv.ellipse(img, (int(x), int(y)), (int(s1), int(s2)), ang, 0, 360, color, 1, cv.LINE_AA)
 
 
-if __name__ == '__main__':
+def main():
     cluster_n = 5
     img_size = 512
 
@@ -66,4 +67,11 @@ if __name__ == '__main__':
         ch = cv.waitKey(0)
         if ch == 27:
             break
+
+    print('Done')
+
+
+if __name__ == '__main__':
+    print(__doc__)
+    main()
     cv.destroyAllWindows()

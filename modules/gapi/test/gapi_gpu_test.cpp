@@ -10,7 +10,7 @@
 
 #include "logger.hpp"
 #include "common/gapi_tests_common.hpp"
-#include "opencv2/gapi/gpu/ggpukernel.hpp"
+#include <opencv2/gapi/gpu/ggpukernel.hpp>
 #include "opencl_kernels_test_gapi.hpp"
 
 
@@ -146,7 +146,7 @@ namespace cv
             }
         };
 
-        cv::gapi::GKernelPackage gpuTestPackage = cv::gapi::kernels
+        cv::GKernelPackage gpuTestPackage = cv::gapi::kernels
             <GGPUSymm7x7_test
             >();
 

@@ -21,9 +21,7 @@ import numpy as np
 import cv2 as cv
 
 
-if __name__ == '__main__':
-    print(__doc__)
-
+def main():
     import sys
     from itertools import cycle
     from common import draw_str
@@ -52,8 +50,11 @@ if __name__ == '__main__':
         cur_str_mode = str_modes.next()
 
     def update(dummy=None):
-        sz = cv.getTrackbarPos('op/size', 'morphology')
-        iters = cv.getTrackbarPos('iters', 'morphology')
+        try: # do not get trackbar position while trackbar is not created
+            sz = cv.getTrackbarPos('op/size', 'morphology')
+            iters = cv.getTrackbarPos('iters', 'morphology')
+        except:
+            return
         opers = cur_mode.split('/')
         if len(opers) > 1:
             sz = sz - 10
@@ -93,4 +94,11 @@ if __name__ == '__main__':
             else:
                 cur_str_mode = str_modes.next()
         update()
+
+    print('Done')
+
+
+if __name__ == '__main__':
+    print(__doc__)
+    main()
     cv.destroyAllWindows()

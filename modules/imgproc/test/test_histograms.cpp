@@ -1198,7 +1198,7 @@ void CV_CalcHistTest::run_func(void)
     }
 
     std::vector<cv::Mat> imagesv(cdims);
-    copy(images.begin(), images.begin() + cdims, imagesv.begin());
+    std::copy(images.begin(), images.begin() + cdims, imagesv.begin());
 
     Mat mask = images[CV_MAX_DIM];
     if( !CV_IS_SPARSE_HIST(hist[0]) )
@@ -1307,9 +1307,18 @@ cvTsCalcHist( const vector<Mat>& images, CvHistogram* hist, Mat mask, const vect
                 for( k = 0; k < cdims; k++ )
                 {
                     double v = val[k], lo = hist->thresh[k][0], hi = hist->thresh[k][1];
-                    idx[k] = cvFloor((v - lo)*dims[k]/(hi - lo));
-                    if( idx[k] < 0 || idx[k] >= dims[k] )
+                    if (v < lo || v >= hi)
                         break;
+                    double idx_ = (v - lo)*dims[k]/(hi - lo);
+                    idx[k] = cvFloor(idx_);
+                    if (idx[k] < 0)
+                    {
+                        idx[k] = 0;
+                    }
+                    if (idx[k] >= dims[k])
+                    {
+                        idx[k] = dims[k] - 1;
+                    }
                 }
             }
             else
@@ -1484,7 +1493,7 @@ void CV_CalcBackProjectTest::run_func(void)
     }
 
     std::vector<cv::Mat> imagesv(hdims);
-    copy(images.begin(), images.begin() + hdims, imagesv.begin());
+    std::copy(images.begin(), images.begin() + hdims, imagesv.begin());
 
     cv::Mat dst = images[CV_MAX_DIM+1];
 
@@ -1947,6 +1956,144 @@ TEST(Imgproc_Hist_Calc, calcHist_regression_11544)
         EXPECT_EQ(hist2.at<float>(i, 0), hist2_opt.at<float>(i, 0)) << i;
     }
 }
+
+TEST(Imgproc_Hist_Calc, badarg)
+{
+    const int channels[] = {0};
+    float range1[] = {0, 10};
+    float range2[] = {10, 20};
+    const float * ranges[] = {range1, range2};
+    Mat img = cv::Mat::zeros(10, 10, CV_8UC1);
+    Mat imgInt = cv::Mat::zeros(10, 10, CV_32SC1);
+    Mat hist;
+    const int hist_size[] = { 100, 100 };
+    // base run
+    EXPECT_NO_THROW(cv::calcHist(&img, 1, channels, noArray(), hist, 1, hist_size, ranges, true));
+    // bad parameters
+    EXPECT_THROW(cv::calcHist(NULL, 1, channels, noArray(), hist, 1, hist_size, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&img, 0, channels, noArray(), hist, 1, hist_size, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&img, 1, NULL, noArray(), hist, 2, hist_size, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&img, 1, channels, noArray(), noArray(), 1, hist_size, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&img, 1, channels, noArray(), hist, -1, hist_size, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&img, 1, channels, noArray(), hist, 1, NULL, ranges, true), cv::Exception);
+    EXPECT_THROW(cv::calcHist(&imgInt, 1, channels, noArray(), hist, 1, hist_size, NULL, true), cv::Exception);
+    // special case
+    EXPECT_NO_THROW(cv::calcHist(&img, 1, channels, noArray(), hist, 1, hist_size, NULL, true));
+
+    Mat backProj;
+    // base run
+    EXPECT_NO_THROW(cv::calcBackProject(&img, 1, channels, hist, backProj, ranges, 1, true));
+    // bad parameters
+    EXPECT_THROW(cv::calcBackProject(NULL, 1, channels, hist, backProj, ranges, 1, true), cv::Exception);
+    EXPECT_THROW(cv::calcBackProject(&img, 0, channels, hist, backProj, ranges, 1, true), cv::Exception);
+    EXPECT_THROW(cv::calcBackProject(&img, 1, channels, noArray(), backProj, ranges, 1, true), cv::Exception);
+    EXPECT_THROW(cv::calcBackProject(&img, 1, channels, hist, noArray(), ranges, 1, true), cv::Exception);
+    EXPECT_THROW(cv::calcBackProject(&imgInt, 1, channels, hist, backProj, NULL, 1, true), cv::Exception);
+    // special case
+    EXPECT_NO_THROW(cv::calcBackProject(&img, 1, channels, hist, backProj, NULL, 1, true));
+}
+
+TEST(Imgproc_Hist_Calc, IPP_ranges_with_equal_exponent_21595)
+{
+    const int channels[] = { 0 };
+    float range1[] = { -0.5f, 1.5f };
+    const float* ranges[] = { range1 };
+    const int hist_size[] = { 2 };
+
+    uint8_t m[1][6] = { { 0, 1, 0, 1 , 1, 1 } };
+    cv::Mat images_u = Mat(1, 6, CV_8UC1, m);
+    cv::Mat histogram_u;
+    cv::calcHist(&images_u, 1, channels, noArray(), histogram_u, 1, hist_size, ranges);
+
+    ASSERT_EQ(histogram_u.at<float>(0), 2.f) << "0 not counts correctly, res: " << histogram_u.at<float>(0);
+    ASSERT_EQ(histogram_u.at<float>(1), 4.f) << "1 not counts correctly, res: " << histogram_u.at<float>(0);
+}
+
+TEST(Imgproc_Hist_Calc, IPP_ranges_with_nonequal_exponent_21595)
+{
+    const int channels[] = { 0 };
+    float range1[] = { -1.3f, 1.5f };
+    const float* ranges[] = { range1 };
+    const int hist_size[] = { 3 };
+
+    uint8_t m[1][6] = { { 0, 1, 0, 1 , 1, 1 } };
+    cv::Mat images_u = Mat(1, 6, CV_8UC1, m);
+    cv::Mat histogram_u;
+    cv::calcHist(&images_u, 1, channels, noArray(), histogram_u, 1, hist_size, ranges);
+
+    ASSERT_EQ(histogram_u.at<float>(0), 0.f) << "not equal to zero, res: " << histogram_u.at<float>(0);
+    ASSERT_EQ(histogram_u.at<float>(1), 2.f) << "0 not counts correctly, res: " << histogram_u.at<float>(1);
+    ASSERT_EQ(histogram_u.at<float>(2), 4.f) << "1 not counts correctly, res: " << histogram_u.at<float>(2);
+}
+
+////////////////////////////////////////// equalizeHist() /////////////////////////////////////////
+
+void equalizeHistReference(const Mat& src, Mat& dst)
+{
+    std::vector<int> hist(256, 0);
+    for (int y = 0; y < src.rows; y++)
+    {
+        const uchar* srow = src.ptr(y);
+        for (int x = 0; x < src.cols; x++)
+        {
+            hist[srow[x]]++;
+        }
+    }
+
+    int first = 0;
+    while (!hist[first]) ++first;
+
+    int total = (int)src.total();
+    if (hist[first] == total)
+    {
+        dst.setTo(first);
+        return;
+    }
+
+    std::vector<uchar> lut(256);
+    lut[first] = 0;
+    float scale = (255.f)/(total - hist[first]);
+
+    int sum = 0;
+    for (int i = first + 1; i < 256; ++i)
+    {
+        sum += hist[i];
+        lut[i] = saturate_cast<uchar>(sum * scale);
+    }
+
+    cv::LUT(src, lut, dst);
+}
+
+typedef ::testing::TestWithParam<std::tuple<cv::Size, int>> Imgproc_Equalize_Hist;
+
+TEST_P(Imgproc_Equalize_Hist, accuracy)
+{
+    auto p = GetParam();
+    cv::Size size = std::get<0>(p);
+    int idx = std::get<1>(p);
+
+    RNG &rng = cvtest::TS::ptr()->get_rng();
+    rng.state += idx;
+
+    cv::Mat src(size, CV_8U);
+    cvtest::randUni(rng, src, Scalar::all(0), Scalar::all(255));
+
+    cv::Mat dst, gold;
+
+    equalizeHistReference(src, gold);
+
+    cv::equalizeHist(src, dst);
+
+    ASSERT_EQ(CV_8UC1, dst.type());
+    ASSERT_EQ(gold.size(), dst.size());
+
+    EXPECT_MAT_NEAR(dst, gold, 1);
+    EXPECT_MAT_N_DIFF(dst, gold, 0.05 * size.area()); // The 5% range could be accomodated to HAL
+}
+
+INSTANTIATE_TEST_CASE_P(Imgproc_Hist, Imgproc_Equalize_Hist, ::testing::Combine(
+                        ::testing::Values(cv::Size(123, 321), cv::Size(256, 256), cv::Size(1024, 768)),
+                        ::testing::Range(0, 10)));
 
 }} // namespace
 /* End Of File */

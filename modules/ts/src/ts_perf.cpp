@@ -1,5 +1,7 @@
 #include "precomp.hpp"
 
+#include "ts_tags.hpp"
+
 #include <map>
 #include <iostream>
 #include <fstream>
@@ -23,8 +25,7 @@ using namespace cvtest;
 using namespace perf;
 
 int64 TestBase::timeLimitDefault = 0;
-unsigned int TestBase::iterationsLimitDefault = (unsigned int)(-1);
-int64 TestBase::_timeadjustment = 0;
+unsigned int TestBase::iterationsLimitDefault = UINT_MAX;
 
 // Item [0] will be considered the default implementation.
 static std::vector<std::string> available_impls;
@@ -999,6 +1000,8 @@ void TestBase::Init(const std::vector<std::string> & availableImpls,
         "{   perf_cuda_info_only         |false    |print an information about system and an available CUDA devices and then exit.}"
 #endif
         "{ skip_unstable                 |false    |skip unstable tests }"
+
+        CV_TEST_TAGS_PARAMS
     ;
 
     cv::CommandLineParser args(argc, argv, command_line_keys);
@@ -1145,6 +1148,8 @@ void TestBase::Init(const std::vector<std::string> & availableImpls,
         ::testing::AddGlobalTestEnvironment(new PerfValidationEnvironment());
     }
 
+    activateTestTags(args);
+
     if (!args.check())
     {
         args.printErrors();
@@ -1152,8 +1157,7 @@ void TestBase::Init(const std::vector<std::string> & availableImpls,
     }
 
     timeLimitDefault = param_time_limit == 0.0 ? 1 : (int64)(param_time_limit * cv::getTickFrequency());
-    iterationsLimitDefault = param_force_samples == 0 ? (unsigned)(-1) : param_force_samples;
-    _timeadjustment = _calibrate();
+    iterationsLimitDefault = param_force_samples == 0 ? UINT_MAX : param_force_samples;
 }
 
 void TestBase::RecordRunParameters()
@@ -1185,58 +1189,6 @@ enum PERF_STRATEGY TestBase::setModulePerformanceStrategy(enum PERF_STRATEGY str
 enum PERF_STRATEGY TestBase::getCurrentModulePerformanceStrategy()
 {
     return strategyForce == PERF_STRATEGY_DEFAULT ? strategyModule : strategyForce;
-}
-
-
-int64 TestBase::_calibrate()
-{
-    CV_TRACE_FUNCTION();
-    class _helper : public ::perf::TestBase
-    {
-        public:
-        performance_metrics& getMetrics() { return calcMetrics(); }
-        virtual void TestBody() {}
-        virtual void PerfTestBody()
-        {
-            //the whole system warmup
-            SetUp();
-            cv::Mat a(2048, 2048, CV_32S, cv::Scalar(1));
-            cv::Mat b(2048, 2048, CV_32S, cv::Scalar(2));
-            declare.time(30);
-            double s = 0;
-            for(declare.iterations(20); next() && startTimer(); stopTimer())
-                s+=a.dot(b);
-            declare.time(s);
-
-            //self calibration
-            SetUp();
-            for(declare.iterations(1000); next() && startTimer(); stopTimer()){}
-        }
-    };
-
-    // Initialize ThreadPool
-    class _dummyParallel : public ParallelLoopBody
-    {
-    public:
-       void operator()(const cv::Range& range) const
-       {
-           // nothing
-           CV_UNUSED(range);
-       }
-    };
-    parallel_for_(cv::Range(0, 1000), _dummyParallel());
-
-    _timeadjustment = 0;
-    _helper h;
-    h.PerfTestBody();
-    double compensation = h.getMetrics().min;
-    if (getCurrentModulePerformanceStrategy() == PERF_STRATEGY_SIMPLE)
-    {
-        CV_Assert(compensation < 0.01 * cv::getTickFrequency());
-        compensation = 0.0f; // simple strategy doesn't require any compensation
-    }
-    LOGD("Time compensation is %.0f", compensation);
-    return (int64)compensation;
 }
 
 #ifdef _MSC_VER
@@ -1283,7 +1235,7 @@ void TestBase::warmup(cv::InputOutputArray a, WarmUpType wtype)
                 cv::randu(a, -128, 128);
             else if (depth == CV_16U)
                 cv::randu(a, 0, 1024);
-            else if (depth == CV_32F || depth == CV_64F)
+            else if (depth == CV_32F || depth == CV_64F || depth == CV_16F)
                 cv::randu(a, -1.0, 1.0);
             else if (depth == CV_16S || depth == CV_32S)
                 cv::randu(a, -4096, 4096);
@@ -1352,7 +1304,7 @@ bool TestBase::next()
     bool has_next = false;
 
     do {
-        assert(currentIter == times.size());
+        CV_Assert(currentIter == times.size());
         if (currentIter == 0)
         {
             has_next = true;
@@ -1365,7 +1317,7 @@ bool TestBase::next()
         }
         else
         {
-            assert(getCurrentPerformanceStrategy() == PERF_STRATEGY_SIMPLE);
+            CV_Assert(getCurrentPerformanceStrategy() == PERF_STRATEGY_SIMPLE);
             if (totalTime - lastActivityPrintTime >= cv::getTickFrequency() * 10)
             {
                 std::cout << '.' << std::endl;
@@ -1547,9 +1499,8 @@ void TestBase::stopTimer()
     if (lastTime == 0)
         ADD_FAILURE() << "  stopTimer() is called before startTimer()/next()";
     lastTime = time - lastTime;
+    CV_Assert(lastTime >= 0);  // TODO: CV_Check* for int64
     totalTime += lastTime;
-    lastTime -= _timeadjustment;
-    if (lastTime < 0) lastTime = 0;
     times.push_back(lastTime);
     lastTime = 0;
 
@@ -1624,7 +1575,7 @@ performance_metrics& TestBase::calcMetrics()
     }
     else
     {
-        assert(false);
+        CV_Assert(false);
     }
 
     int offset = static_cast<int>(start - times.begin());
@@ -1700,7 +1651,7 @@ void TestBase::validateMetrics()
     }
     else
     {
-        assert(false);
+        CV_Assert(false);
     }
 }
 
@@ -1869,14 +1820,15 @@ void TestBase::SetUp()
     currentIter = (unsigned int)-1;
     timeLimit = timeLimitDefault;
     times.clear();
+    metrics.terminationReason = performance_metrics::TERM_SKIP_TEST;
 }
 
 void TestBase::TearDown()
 {
     if (metrics.terminationReason == performance_metrics::TERM_SKIP_TEST)
     {
-        LOGI("\tTest was skipped");
-        GTEST_SUCCEED() << "Test was skipped";
+        //LOGI("\tTest was skipped");
+        //GTEST_SUCCEED() << "Test was skipped";
     }
     else
     {
@@ -1975,6 +1927,7 @@ std::string TestBase::getDataPath(const std::string& relativePath)
 
 void TestBase::RunPerfTestBody()
 {
+    metrics.clear();
     try
     {
 #ifdef CV_COLLECT_IMPL_DATA
@@ -1987,15 +1940,15 @@ void TestBase::RunPerfTestBody()
             implConf.GetImpl();
 #endif
     }
-    catch(const SkipTestException&)
-    {
-        metrics.terminationReason = performance_metrics::TERM_SKIP_TEST;
-        return;
-    }
     catch(const PerfSkipTestException&)
     {
         metrics.terminationReason = performance_metrics::TERM_SKIP_TEST;
         return;
+    }
+    catch(const cvtest::details::SkipTestExceptionBase&)
+    {
+        metrics.terminationReason = performance_metrics::TERM_SKIP_TEST;
+        throw;
     }
     catch(const PerfEarlyExitException&)
     {
@@ -2151,8 +2104,6 @@ struct KeypointComparator
     {
         return cmp(pts_[idx1], pts_[idx2]);
     }
-private:
-    const KeypointComparator& operator=(const KeypointComparator&); // quiet MSVC
 };
 }//namespace
 
@@ -2166,7 +2117,8 @@ void perf::sort(std::vector<cv::KeyPoint>& pts, cv::InputOutputArray descriptors
     for (int i = 0; i < desc.rows; ++i)
         idxs[i] = i;
 
-    std::sort(idxs.data(), idxs.data() + desc.rows, KeypointComparator(pts));
+    comparators::KeypointGreater cmp;
+    std::sort(idxs.data(), idxs.data() + desc.rows, [&](int lhs, int rhs){ return cmp(pts[lhs], pts[rhs]); });
 
     std::vector<cv::KeyPoint> spts(pts.size());
     cv::Mat sdesc(desc.size(), desc.type());

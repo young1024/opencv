@@ -1,5 +1,5 @@
 /**
- * @file LinearBlend.cpp
+ * @file AddingImagesTrackbar.cpp
  * @brief Simple linear blender ( dst = alpha*src1 + beta*src2 )
  * @author OpenCV team
  */
@@ -44,8 +44,8 @@ int main( void )
 {
    //![load]
    /// Read images ( both have to be of the same size and type )
-   src1 = imread("../data/LinuxLogo.jpg");
-   src2 = imread("../data/WindowsLogo.jpg");
+   src1 = imread( samples::findFile("LinuxLogo.jpg") );
+   src2 = imread( samples::findFile("WindowsLogo.jpg") );
    //![load]
 
    if( src1.empty() ) { cout << "Error loading src1 \n"; return -1; }
@@ -60,7 +60,7 @@ int main( void )
 
    //![create_trackbar]
    char TrackbarName[50];
-   sprintf( TrackbarName, "Alpha x %d", alpha_slider_max );
+   snprintf( TrackbarName, sizeof(TrackbarName), "Alpha x %d", alpha_slider_max );
    createTrackbar( TrackbarName, "Linear Blend", &alpha_slider, alpha_slider_max, on_trackbar );
    //![create_trackbar]
 

@@ -76,6 +76,8 @@ class VariationalRefinementImpl CV_FINAL : public VariationalRefinement
     void setDelta(float val) CV_OVERRIDE { delta = val; }
     float getGamma() const CV_OVERRIDE { return gamma; }
     void setGamma(float val) CV_OVERRIDE { gamma = val; }
+    float getEpsilon() const CV_OVERRIDE { return epsilon; }
+    void setEpsilon(float val) CV_OVERRIDE { epsilon = val; }
 
   protected: //!< internal buffers
     /* This struct defines a special data layout for Mat_<float>. Original buffer is split into two: one for "red"
@@ -133,20 +135,28 @@ class VariationalRefinementImpl CV_FINAL : public VariationalRefinement
     };
     void gradHorizAndSplitOp(void *src, void *dst, void *dst_split)
     {
+        CV_INSTRUMENT_REGION();
+
         Sobel(*(Mat *)src, *(Mat *)dst, -1, 1, 0, 1, 1, 0.00, BORDER_REPLICATE);
         splitCheckerboard(*(RedBlackBuffer *)dst_split, *(Mat *)dst);
     }
     void gradVertAndSplitOp(void *src, void *dst, void *dst_split)
     {
+        CV_INSTRUMENT_REGION();
+
         Sobel(*(Mat *)src, *(Mat *)dst, -1, 0, 1, 1, 1, 0.00, BORDER_REPLICATE);
         splitCheckerboard(*(RedBlackBuffer *)dst_split, *(Mat *)dst);
     }
     void averageOp(void *src1, void *src2, void *dst)
     {
+        CV_INSTRUMENT_REGION();
+
         addWeighted(*(Mat *)src1, 0.5, *(Mat *)src2, 0.5, 0.0, *(Mat *)dst, CV_32F);
     }
     void subtractOp(void *src1, void *src2, void *dst)
     {
+        CV_INSTRUMENT_REGION();
+
         subtract(*(Mat *)src1, *(Mat *)src2, *(Mat *)dst, noArray(), CV_32F);
     }
 
@@ -206,6 +216,8 @@ class VariationalRefinementImpl CV_FINAL : public VariationalRefinement
 
 VariationalRefinementImpl::VariationalRefinementImpl()
 {
+    CV_INSTRUMENT_REGION();
+
     fixedPointIterations = 5;
     sorIterations = 5;
     alpha = 20.0f;
@@ -222,6 +234,8 @@ VariationalRefinementImpl::VariationalRefinementImpl()
  */
 void VariationalRefinementImpl::splitCheckerboard(RedBlackBuffer &dst, Mat &src)
 {
+    CV_INSTRUMENT_REGION();
+
     int buf_j, j;
     int buf_w = (int)ceil(src.cols / 2.0) + 2; //!< max width of red/black buffers with borders
 
@@ -288,6 +302,8 @@ void VariationalRefinementImpl::splitCheckerboard(RedBlackBuffer &dst, Mat &src)
  */
 void VariationalRefinementImpl::mergeCheckerboard(Mat &dst, RedBlackBuffer &src)
 {
+    CV_INSTRUMENT_REGION();
+
     int buf_j, j;
     for (int i = 0; i < dst.rows; i++)
     {
@@ -326,6 +342,8 @@ void VariationalRefinementImpl::mergeCheckerboard(Mat &dst, RedBlackBuffer &src)
  */
 void VariationalRefinementImpl::updateRepeatedBorders(RedBlackBuffer &dst)
 {
+    CV_INSTRUMENT_REGION();
+
     int buf_w = dst.red.cols;
     for (int i = 0; i < dst.red.rows - 2; i++)
     {
@@ -369,10 +387,14 @@ void VariationalRefinementImpl::updateRepeatedBorders(RedBlackBuffer &dst)
 
 VariationalRefinementImpl::RedBlackBuffer::RedBlackBuffer()
 {
+    CV_INSTRUMENT_REGION();
+
     release();
 }
 void VariationalRefinementImpl::RedBlackBuffer::create(Size s)
 {
+    CV_INSTRUMENT_REGION();
+
     /* Allocate enough memory to include borders */
     int w = (int)ceil(s.width / 2.0) + 2;
     red.create(s.height + 2, w);
@@ -389,6 +411,8 @@ void VariationalRefinementImpl::RedBlackBuffer::create(Size s)
 
 void VariationalRefinementImpl::RedBlackBuffer::release()
 {
+    CV_INSTRUMENT_REGION();
+
     red.release();
     black.release();
     red_even_len = red_odd_len = black_even_len = black_odd_len = 0;
@@ -403,12 +427,16 @@ VariationalRefinementImpl::ParallelOp_ParBody::ParallelOp_ParBody(VariationalRef
 
 void VariationalRefinementImpl::ParallelOp_ParBody::operator()(const Range &range) const
 {
+    CV_INSTRUMENT_REGION();
+
     for (int i = range.start; i < range.end; i++)
         (var->*ops[i])(op1s[i], op2s[i], op3s[i]);
 }
 
 void VariationalRefinementImpl::warpImage(Mat &dst, Mat &src, Mat &flow_u, Mat &flow_v)
 {
+    CV_INSTRUMENT_REGION();
+
     for (int i = 0; i < flow_u.rows; i++)
     {
         float *pFlowU = flow_u.ptr<float>(i);
@@ -426,6 +454,8 @@ void VariationalRefinementImpl::warpImage(Mat &dst, Mat &src, Mat &flow_u, Mat &
 
 void VariationalRefinementImpl::prepareBuffers(Mat &I0, Mat &I1, Mat &W_u, Mat &W_v)
 {
+    CV_INSTRUMENT_REGION();
+
     Size s = I0.size();
     A11.create(s);
     A12.create(s);
@@ -550,6 +580,8 @@ VariationalRefinementImpl::ComputeDataTerm_ParBody::ComputeDataTerm_ParBody(Vari
  */
 void VariationalRefinementImpl::ComputeDataTerm_ParBody::operator()(const Range &range) const
 {
+    CV_INSTRUMENT_REGION();
+
     int start_i = min(range.start * stripe_sz, h);
     int end_i = min(range.end * stripe_sz, h);
 
@@ -621,15 +653,15 @@ void VariationalRefinementImpl::ComputeDataTerm_ParBody::operator()(const Range 
             pdU_vec = v_load(pdU + j);
             pdV_vec = v_load(pdV + j);
 
-            derivNorm_vec = pIx_vec * pIx_vec + pIy_vec * pIy_vec + zeta_vec;
-            Ik1z_vec = pIz_vec + pIx_vec * pdU_vec + pIy_vec * pdV_vec;
-            weight_vec = (delta_vec / v_sqrt(Ik1z_vec * Ik1z_vec / derivNorm_vec + eps_vec)) / derivNorm_vec;
+            derivNorm_vec = v_add(v_add(v_mul(pIx_vec, pIx_vec), v_mul(pIy_vec, pIy_vec)), zeta_vec);
+            Ik1z_vec = v_add(v_add(pIz_vec, v_mul(pIx_vec, pdU_vec)), v_mul(pIy_vec, pdV_vec));
+            weight_vec = v_div(v_div(delta_vec, v_sqrt(v_add(v_div(v_mul(Ik1z_vec, Ik1z_vec), derivNorm_vec), eps_vec))), derivNorm_vec);
 
-            pa11_vec = weight_vec * (pIx_vec * pIx_vec) + zeta_vec;
-            pa12_vec = weight_vec * (pIx_vec * pIy_vec);
-            pa22_vec = weight_vec * (pIy_vec * pIy_vec) + zeta_vec;
-            pb1_vec = zero_vec - weight_vec * (pIz_vec * pIx_vec);
-            pb2_vec = zero_vec - weight_vec * (pIz_vec * pIy_vec);
+            pa11_vec = v_add(v_mul(weight_vec, v_mul(pIx_vec, pIx_vec)), zeta_vec);
+            pa12_vec = v_mul(weight_vec, v_mul(pIx_vec, pIy_vec));
+            pa22_vec = v_add(v_mul(weight_vec, v_mul(pIy_vec, pIy_vec)), zeta_vec);
+            pb1_vec = v_sub(zero_vec, v_mul(weight_vec, v_mul(pIz_vec, pIx_vec)));
+            pb2_vec = v_sub(zero_vec, v_mul(weight_vec, v_mul(pIz_vec, pIy_vec)));
 
             pIxx_vec = v_load(pIxx + j);
             pIxy_vec = v_load(pIxy + j);
@@ -637,18 +669,17 @@ void VariationalRefinementImpl::ComputeDataTerm_ParBody::operator()(const Range 
             pIxz_vec = v_load(pIxz + j);
             pIyz_vec = v_load(pIyz + j);
 
-            derivNorm_vec = pIxx_vec * pIxx_vec + pIxy_vec * pIxy_vec + zeta_vec;
-            derivNorm2_vec = pIyy_vec * pIyy_vec + pIxy_vec * pIxy_vec + zeta_vec;
-            Ik1zx_vec = pIxz_vec + pIxx_vec * pdU_vec + pIxy_vec * pdV_vec;
-            Ik1zy_vec = pIyz_vec + pIxy_vec * pdU_vec + pIyy_vec * pdV_vec;
-            weight_vec = gamma_vec / v_sqrt(Ik1zx_vec * Ik1zx_vec / derivNorm_vec +
-                                            Ik1zy_vec * Ik1zy_vec / derivNorm2_vec + eps_vec);
+            derivNorm_vec = v_add(v_add(v_mul(pIxx_vec, pIxx_vec), v_mul(pIxy_vec, pIxy_vec)), zeta_vec);
+            derivNorm2_vec = v_add(v_add(v_mul(pIyy_vec, pIyy_vec), v_mul(pIxy_vec, pIxy_vec)), zeta_vec);
+            Ik1zx_vec = v_add(v_add(pIxz_vec, v_mul(pIxx_vec, pdU_vec)), v_mul(pIxy_vec, pdV_vec));
+            Ik1zy_vec = v_add(v_add(pIyz_vec, v_mul(pIxy_vec, pdU_vec)), v_mul(pIyy_vec, pdV_vec));
+            weight_vec = v_div(gamma_vec, v_sqrt(v_add(v_add(v_div(v_mul(Ik1zx_vec, Ik1zx_vec), derivNorm_vec), v_div(v_mul(Ik1zy_vec, Ik1zy_vec), derivNorm2_vec)), eps_vec)));
 
-            pa11_vec += weight_vec * (pIxx_vec * pIxx_vec / derivNorm_vec + pIxy_vec * pIxy_vec / derivNorm2_vec);
-            pa12_vec += weight_vec * (pIxx_vec * pIxy_vec / derivNorm_vec + pIxy_vec * pIyy_vec / derivNorm2_vec);
-            pa22_vec += weight_vec * (pIxy_vec * pIxy_vec / derivNorm_vec + pIyy_vec * pIyy_vec / derivNorm2_vec);
-            pb1_vec -= weight_vec * (pIxx_vec * pIxz_vec / derivNorm_vec + pIxy_vec * pIyz_vec / derivNorm2_vec);
-            pb2_vec -= weight_vec * (pIxy_vec * pIxz_vec / derivNorm_vec + pIyy_vec * pIyz_vec / derivNorm2_vec);
+            pa11_vec = v_add(pa11_vec, v_mul(weight_vec, v_add(v_div(v_mul(pIxx_vec, pIxx_vec), derivNorm_vec), v_div(v_mul(pIxy_vec, pIxy_vec), derivNorm2_vec))));
+            pa12_vec = v_add(pa12_vec, v_mul(weight_vec, v_add(v_div(v_mul(pIxx_vec, pIxy_vec), derivNorm_vec), v_div(v_mul(pIxy_vec, pIyy_vec), derivNorm2_vec))));
+            pa22_vec = v_add(pa22_vec, v_mul(weight_vec, v_add(v_div(v_mul(pIxy_vec, pIxy_vec), derivNorm_vec), v_div(v_mul(pIyy_vec, pIyy_vec), derivNorm2_vec))));
+            pb1_vec = v_sub(pb1_vec, v_mul(weight_vec, v_add(v_div(v_mul(pIxx_vec, pIxz_vec), derivNorm_vec), v_div(v_mul(pIxy_vec, pIyz_vec), derivNorm2_vec))));
+            pb2_vec = v_sub(pb2_vec, v_mul(weight_vec, v_add(v_div(v_mul(pIxy_vec, pIxz_vec), derivNorm_vec), v_div(v_mul(pIyy_vec, pIyz_vec), derivNorm2_vec))));
 
             v_store(pa11 + j, pa11_vec);
             v_store(pa12 + j, pa12_vec);
@@ -709,6 +740,8 @@ VariationalRefinementImpl::ComputeSmoothnessTermHorPass_ParBody::ComputeSmoothne
  */
 void VariationalRefinementImpl::ComputeSmoothnessTermHorPass_ParBody::operator()(const Range &range) const
 {
+    CV_INSTRUMENT_REGION();
+
     int start_i = min(range.start * stripe_sz, h);
     int end_i = min(range.end * stripe_sz, h);
 
@@ -818,26 +851,26 @@ void VariationalRefinementImpl::ComputeSmoothnessTermHorPass_ParBody::operator()
             cW_u_vec = v_load(cW_u + j);
             cW_v_vec = v_load(cW_v + j);
 
-            ux_vec = v_load(cW_u_next + j) - cW_u_vec;
-            vx_vec = v_load(cW_v_next + j) - cW_v_vec;
-            uy_vec = v_load(cW_u_next_row + j) - cW_u_vec;
-            vy_vec = v_load(cW_v_next_row + j) - cW_v_vec;
+            ux_vec = v_sub(v_load(cW_u_next + j), cW_u_vec);
+            vx_vec = v_sub(v_load(cW_v_next + j), cW_v_vec);
+            uy_vec = v_sub(v_load(cW_u_next_row + j), cW_u_vec);
+            vy_vec = v_sub(v_load(cW_v_next_row + j), cW_v_vec);
             pWeight_vec =
-              alpha2_vec / v_sqrt(ux_vec * ux_vec + vx_vec * vx_vec + uy_vec * uy_vec + vy_vec * vy_vec + eps_vec);
+              v_div(alpha2_vec, v_sqrt(v_add(v_add(v_add(v_add(v_mul(ux_vec, ux_vec), v_mul(vx_vec, vx_vec)), v_mul(uy_vec, uy_vec)), v_mul(vy_vec, vy_vec)), eps_vec)));
             v_store(pWeight + j, pWeight_vec);
 
-            ux_vec = pWeight_vec * (v_load(pW_u_next + j) - v_load(pW_u + j));
-            vx_vec = pWeight_vec * (v_load(pW_v_next + j) - v_load(pW_v + j));
+            ux_vec = v_mul(pWeight_vec, v_sub(v_load(pW_u_next + j), v_load(pW_u + j)));
+            vx_vec = v_mul(pWeight_vec, v_sub(v_load(pW_v_next + j), v_load(pW_v + j)));
 
-            v_store(pA_u + j, v_load(pA_u + j) + pWeight_vec);
-            v_store(pA_v + j, v_load(pA_v + j) + pWeight_vec);
-            v_store(pB_u + j, v_load(pB_u + j) + ux_vec);
-            v_store(pB_v + j, v_load(pB_v + j) + vx_vec);
+            v_store(pA_u + j, v_add(v_load(pA_u + j), pWeight_vec));
+            v_store(pA_v + j, v_add(v_load(pA_v + j), pWeight_vec));
+            v_store(pB_u + j, v_add(v_load(pB_u + j), ux_vec));
+            v_store(pB_v + j, v_add(v_load(pB_v + j), vx_vec));
 
-            v_store(pA_u_next + j, v_load(pA_u_next + j) + pWeight_vec);
-            v_store(pA_v_next + j, v_load(pA_v_next + j) + pWeight_vec);
-            v_store(pB_u_next + j, v_load(pB_u_next + j) - ux_vec);
-            v_store(pB_v_next + j, v_load(pB_v_next + j) - vx_vec);
+            v_store(pA_u_next + j, v_add(v_load(pA_u_next + j), pWeight_vec));
+            v_store(pA_v_next + j, v_add(v_load(pA_v_next + j), pWeight_vec));
+            v_store(pB_u_next + j, v_sub(v_load(pB_u_next + j), ux_vec));
+            v_store(pB_v_next + j, v_sub(v_load(pB_v_next + j), vx_vec));
         }
 #endif
         for (; j < len - 1; j++)
@@ -873,6 +906,8 @@ VariationalRefinementImpl::ComputeSmoothnessTermVertPass_ParBody::ComputeSmoothn
 /* This function adds the last remaining terms to the linear system coefficients A11,A22,b1,b1. */
 void VariationalRefinementImpl::ComputeSmoothnessTermVertPass_ParBody::operator()(const Range &range) const
 {
+    CV_INSTRUMENT_REGION();
+
     int start_i = min(range.start * stripe_sz, h);
     int end_i = min(range.end * stripe_sz, h);
 
@@ -922,18 +957,18 @@ void VariationalRefinementImpl::ComputeSmoothnessTermVertPass_ParBody::operator(
         for (; j < len - 3; j += 4)
         {
             pWeight_vec = v_load(pWeight + j);
-            uy_vec = pWeight_vec * (v_load(pW_u_next_row + j) - v_load(pW_u + j));
-            vy_vec = pWeight_vec * (v_load(pW_v_next_row + j) - v_load(pW_v + j));
+            uy_vec = v_mul(pWeight_vec, v_sub(v_load(pW_u_next_row + j), v_load(pW_u + j)));
+            vy_vec = v_mul(pWeight_vec, v_sub(v_load(pW_v_next_row + j), v_load(pW_v + j)));
 
-            v_store(pA_u + j, v_load(pA_u + j) + pWeight_vec);
-            v_store(pA_v + j, v_load(pA_v + j) + pWeight_vec);
-            v_store(pB_u + j, v_load(pB_u + j) + uy_vec);
-            v_store(pB_v + j, v_load(pB_v + j) + vy_vec);
+            v_store(pA_u + j, v_add(v_load(pA_u + j), pWeight_vec));
+            v_store(pA_v + j, v_add(v_load(pA_v + j), pWeight_vec));
+            v_store(pB_u + j, v_add(v_load(pB_u + j), uy_vec));
+            v_store(pB_v + j, v_add(v_load(pB_v + j), vy_vec));
 
-            v_store(pA_u_next_row + j, v_load(pA_u_next_row + j) + pWeight_vec);
-            v_store(pA_v_next_row + j, v_load(pA_v_next_row + j) + pWeight_vec);
-            v_store(pB_u_next_row + j, v_load(pB_u_next_row + j) - uy_vec);
-            v_store(pB_v_next_row + j, v_load(pB_v_next_row + j) - vy_vec);
+            v_store(pA_u_next_row + j, v_add(v_load(pA_u_next_row + j), pWeight_vec));
+            v_store(pA_v_next_row + j, v_add(v_load(pA_v_next_row + j), pWeight_vec));
+            v_store(pB_u_next_row + j, v_sub(v_load(pB_u_next_row + j), uy_vec));
+            v_store(pB_v_next_row + j, v_sub(v_load(pB_v_next_row + j), vy_vec));
         }
 #endif
         for (; j < len; j++)
@@ -965,6 +1000,8 @@ VariationalRefinementImpl::RedBlackSOR_ParBody::RedBlackSOR_ParBody(VariationalR
  */
 void VariationalRefinementImpl::RedBlackSOR_ParBody::operator()(const Range &range) const
 {
+    CV_INSTRUMENT_REGION();
+
     int start = min(range.start * stripe_sz, h);
     int end = min(range.end * stripe_sz, h);
 
@@ -1048,15 +1085,13 @@ void VariationalRefinementImpl::RedBlackSOR_ParBody::operator()(const Range &ran
             pdv_shifted_vec = v_reinterpret_as_f32(
               v_extract<3>(v_reinterpret_as_s32(pdv_prev_vec), v_reinterpret_as_s32(pdv_next_vec)));
 
-            sigmaU_vec = pW_shifted_vec * pdu_shifted_vec + pW_vec * pdu_next_vec + pW_prev_row_vec * pdu_prev_row_vec +
-                         pW_vec * pdu_next_row_vec;
-            sigmaV_vec = pW_shifted_vec * pdv_shifted_vec + pW_vec * pdv_next_vec + pW_prev_row_vec * pdv_prev_row_vec +
-                         pW_vec * pdv_next_row_vec;
+            sigmaU_vec = v_add(v_add(v_add(v_mul(pW_shifted_vec, pdu_shifted_vec), v_mul(pW_vec, pdu_next_vec)), v_mul(pW_prev_row_vec, pdu_prev_row_vec)), v_mul(pW_vec, pdu_next_row_vec));
+            sigmaV_vec = v_add(v_add(v_add(v_mul(pW_shifted_vec, pdv_shifted_vec), v_mul(pW_vec, pdv_next_vec)), v_mul(pW_prev_row_vec, pdv_prev_row_vec)), v_mul(pW_vec, pdv_next_row_vec));
 
             pdu_vec = v_load(pdu + j);
             pdv_vec = v_load(pdv + j);
-            pdu_vec += omega_vec * ((sigmaU_vec + v_load(pb1 + j) - pdv_vec * pa12_vec) / v_load(pa11 + j) - pdu_vec);
-            pdv_vec += omega_vec * ((sigmaV_vec + v_load(pb2 + j) - pdu_vec * pa12_vec) / v_load(pa22 + j) - pdv_vec);
+            pdu_vec = v_add(pdu_vec, v_mul(omega_vec, v_sub(v_div(v_sub(v_add(sigmaU_vec, v_load(pb1 + j)), v_mul(pdv_vec, pa12_vec)), v_load(pa11 + j)), pdu_vec)));
+            pdv_vec = v_add(pdv_vec, v_mul(omega_vec, v_sub(v_div(v_sub(v_add(sigmaV_vec, v_load(pb2 + j)), v_mul(pdu_vec, pa12_vec)), v_load(pa22 + j)), pdv_vec)));
             v_store(pdu + j, pdu_vec);
             v_store(pdv + j, pdv_vec);
 
@@ -1079,6 +1114,8 @@ void VariationalRefinementImpl::RedBlackSOR_ParBody::operator()(const Range &ran
 
 void VariationalRefinementImpl::calc(InputArray I0, InputArray I1, InputOutputArray flow)
 {
+    CV_INSTRUMENT_REGION();
+
     CV_Assert(!I0.empty() && I0.channels() == 1);
     CV_Assert(!I1.empty() && I1.channels() == 1);
     CV_Assert(I0.sameSize(I1));
@@ -1095,6 +1132,8 @@ void VariationalRefinementImpl::calc(InputArray I0, InputArray I1, InputOutputAr
 
 void VariationalRefinementImpl::calcUV(InputArray I0, InputArray I1, InputOutputArray flow_u, InputOutputArray flow_v)
 {
+    CV_INSTRUMENT_REGION();
+
     CV_Assert(!I0.empty() && I0.channels() == 1);
     CV_Assert(!I1.empty() && I1.channels() == 1);
     CV_Assert(I0.sameSize(I1));
@@ -1124,6 +1163,8 @@ void VariationalRefinementImpl::calcUV(InputArray I0, InputArray I1, InputOutput
 
     for (int i = 0; i < fixedPointIterations; i++)
     {
+        CV_TRACE_REGION("fixedPoint_iteration");
+
         parallel_for_(Range(0, num_stripes), ComputeDataTerm_ParBody(*this, num_stripes, I0Mat.rows, dW_u, dW_v, true));
         parallel_for_(Range(0, num_stripes), ComputeDataTerm_ParBody(*this, num_stripes, I0Mat.rows, dW_u, dW_v, false));
 
@@ -1139,6 +1180,7 @@ void VariationalRefinementImpl::calcUV(InputArray I0, InputArray I1, InputOutput
 
         for (int j = 0; j < sorIterations; j++)
         {
+            CV_TRACE_REGION("SOR_iteration");
             parallel_for_(Range(0, num_stripes), RedBlackSOR_ParBody(*this, num_stripes, I0Mat.rows, dW_u, dW_v, true));
             parallel_for_(Range(0, num_stripes), RedBlackSOR_ParBody(*this, num_stripes, I0Mat.rows, dW_u, dW_v, false));
         }
@@ -1155,6 +1197,8 @@ void VariationalRefinementImpl::calcUV(InputArray I0, InputArray I1, InputOutput
 }
 void VariationalRefinementImpl::collectGarbage()
 {
+    CV_INSTRUMENT_REGION();
+
     Ix.release();
     Iy.release();
     Iz.release();

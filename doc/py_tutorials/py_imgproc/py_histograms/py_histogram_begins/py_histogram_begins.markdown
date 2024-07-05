@@ -41,8 +41,7 @@ you need 256 values to show the above histogram. But consider, what if you need 
 of pixels for all pixel values separately, but number of pixels in a interval of pixel values? say
 for example, you need to find the number of pixels lying between 0 to 15, then 16 to 31, ..., 240 to 255.
 You will need only 16 values to represent the histogram. And that is what is shown in example
-given in [OpenCV Tutorials on
-histograms](http://docs.opencv.org/doc/tutorials/imgproc/histograms/histogram_calculation/histogram_calculation.html#histogram-calculation).
+given in @ref tutorial_histogram_calculation "OpenCV Tutorials on histograms".
 
 So what you do is simply split the whole histogram to 16 sub-parts and value of each sub-part is the
 sum of all pixel count in it. This each sub-part is called "BIN". In first case, number of bins
@@ -78,7 +77,8 @@ and its parameters :
 So let's start with a sample image. Simply load an image in grayscale mode and find its full
 histogram.
 @code{.py}
-img = cv.imread('home.jpg',0)
+img = cv.imread('home.jpg', cv.IMREAD_GRAYSCALE)
+assert img is not None, "file could not be read, check with os.path.exists()"
 hist = cv.calcHist([img],[0],None,[256],[0,256])
 @endcode
 hist is a 256x1 array, each value corresponds to number of pixels in that image with its
@@ -95,7 +95,7 @@ hist is same as we calculated before. But bins will have 257 elements, because N
 as 0-0.99, 1-1.99, 2-2.99 etc. So final range would be 255-255.99. To represent that, they also add
 256 at end of bins. But we don't need that 256. Upto 255 is sufficient.
 
-@sa Numpy has another function, **np.bincount()** which is much faster than (around 10X)
+@note Numpy has another function, **np.bincount()** which is much faster than (around 10X)
 np.histogram(). So for one-dimensional histograms, you can better try that. Don't forget to set
 minlength = 256 in np.bincount. For example, hist = np.bincount(img.ravel(),minlength=256)
 
@@ -122,7 +122,8 @@ import numpy as np
 import cv2 as cv
 from matplotlib import pyplot as plt
 
-img = cv.imread('home.jpg',0)
+img = cv.imread('home.jpg', cv.IMREAD_GRAYSCALE)
+assert img is not None, "file could not be read, check with os.path.exists()"
 plt.hist(img.ravel(),256,[0,256]); plt.show()
 @endcode
 You will get a plot as below :
@@ -137,6 +138,7 @@ import cv2 as cv
 from matplotlib import pyplot as plt
 
 img = cv.imread('home.jpg')
+assert img is not None, "file could not be read, check with os.path.exists()"
 color = ('b','g','r')
 for i,col in enumerate(color):
     histr = cv.calcHist([img],[i],None,[256],[0,256])
@@ -165,7 +167,8 @@ We used cv.calcHist() to find the histogram of the full image. What if you want 
 of some regions of an image? Just create a mask image with white color on the region you want to
 find histogram and black otherwise. Then pass this as the mask.
 @code{.py}
-img = cv.imread('home.jpg',0)
+img = cv.imread('home.jpg', cv.IMREAD_GRAYSCALE)
+assert img is not None, "file could not be read, check with os.path.exists()"
 
 # create a mask
 mask = np.zeros(img.shape[:2], np.uint8)

@@ -50,12 +50,20 @@
 #ifndef OPENCV_IMGPROC_IMGWARP_HPP
 #define OPENCV_IMGPROC_IMGWARP_HPP
 #include "precomp.hpp"
+#include "opencv2/core/hal/intrin.hpp"
 
 namespace cv
 {
 namespace opt_AVX2
 {
 #if CV_TRY_AVX2
+int warpAffineBlockline(int *adelta, int *bdelta, short* xy, short* alpha, int X0, int Y0, int bw);
+#endif
+}
+
+namespace opt_LASX
+{
+#if CV_TRY_LASX
 int warpAffineBlockline(int *adelta, int *bdelta, short* xy, short* alpha, int X0, int Y0, int bw);
 #endif
 }
@@ -74,10 +82,16 @@ public:
     static Ptr<WarpPerspectiveLine_SSE4> getImpl(const double *M);
     virtual void processNN(const double *M, short* xy, double X0, double Y0, double W0, int bw) = 0;
     virtual void process(const double *M, short* xy, short* alpha, double X0, double Y0, double W0, int bw) = 0;
-    virtual ~WarpPerspectiveLine_SSE4() {};
+    virtual ~WarpPerspectiveLine_SSE4() {}
 };
 #endif
 }
+
+#if CV_SIMD128_64F
+void WarpPerspectiveLine_ProcessNN_CV_SIMD(const double *M, short* xy, double X0, double Y0, double W0, int bw);
+void WarpPerspectiveLine_Process_CV_SIMD(const double *M, short* xy, short* alpha, double X0, double Y0, double W0, int bw);
+#endif
+
 }
 #endif
 /* End of file. */

@@ -21,7 +21,7 @@ def tokenize(s):
                 elif token:
                     tokens.append(token)
                     token = ""
-            isString = (symbol == '\"' or symbol == '\'') ^ isString;
+            isString = (symbol == '\"' or symbol == '\'') ^ isString
 
         elif symbol == '{' or symbol == '}' or symbol == '[' or symbol == ']':
             if token:
@@ -269,8 +269,12 @@ def parseTextGraph(filePath):
 def removeIdentity(graph_def):
     identities = {}
     for node in graph_def.node:
-        if node.op == 'Identity':
-            identities[node.name] = node.input[0]
+        if node.op == 'Identity' or node.op == 'IdentityN':
+            inp = node.input[0]
+            if inp in identities:
+                identities[node.name] = identities[inp]
+            else:
+                identities[node.name] = inp
             graph_def.node.remove(node)
 
     for node in graph_def.node:
@@ -324,6 +328,6 @@ def writeTextGraph(modelPath, outputPath, outNodes):
             for node in graph_def.node:
                 if node.op == 'Const':
                     if 'value' in node.attr and node.attr['value'].tensor.tensor_content:
-                        node.attr['value'].tensor.tensor_content = ''
+                        node.attr['value'].tensor.tensor_content = b''
 
         tf.train.write_graph(graph_def, "", outputPath, as_text=True)

@@ -5,10 +5,11 @@
 // Copyright (C) 2018 Intel Corporation
 
 
-#include "test_precomp.hpp"
+#include "../test_precomp.hpp"
 
 #include "compiler/gmodel.hpp"
 #include "compiler/gcompiled_priv.hpp"
+#include "compiler/gmodel_priv.hpp"
 
 namespace opencv_test
 {
@@ -626,7 +627,7 @@ namespace
         void assignIsland(const std::string &s)
         {
             cv::gapi::island(s, cv::GIn(tmp[0]), cv::GOut(tmp[2]));
-        };
+        }
     };
     TEST_P(CheckName, Test)
     {

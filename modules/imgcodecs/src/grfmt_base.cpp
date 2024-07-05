@@ -53,8 +53,14 @@ BaseImageDecoder::BaseImageDecoder()
     m_type = -1;
     m_buf_supported = false;
     m_scale_denom = 1;
+    m_use_rgb = false;
 }
 
+
+ExifEntry_t BaseImageDecoder::getExifTag(const ExifTagName tag) const
+{
+    return m_exif.getTag(tag);
+}
 bool BaseImageDecoder::setSource( const String& filename )
 {
     m_filename = filename;
@@ -87,6 +93,11 @@ int BaseImageDecoder::setScale( const int& scale_denom )
     int temp = m_scale_denom;
     m_scale_denom = scale_denom;
     return temp;
+}
+
+void BaseImageDecoder::setRGB(bool useRGB)
+{
+    m_use_rgb = useRGB;
 }
 
 ImageDecoder BaseImageDecoder::newDecoder() const

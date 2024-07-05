@@ -38,15 +38,15 @@ public class ImgcodecsTest extends OpenCVTestCase {
 
     public void testImreadString() {
         dst = Imgcodecs.imread(OpenCVTestRunner.LENA_PATH);
-        assertTrue(!dst.empty());
+        assertFalse(dst.empty());
         assertEquals(3, dst.channels());
         assertTrue(512 == dst.cols());
         assertTrue(512 == dst.rows());
     }
 
     public void testImreadStringInt() {
-        dst = Imgcodecs.imread(OpenCVTestRunner.LENA_PATH, 0);
-        assertTrue(!dst.empty());
+        dst = Imgcodecs.imread(OpenCVTestRunner.LENA_PATH, Imgcodecs.IMREAD_GRAYSCALE);
+        assertFalse(dst.empty());
         assertEquals(1, dst.channels());
         assertTrue(512 == dst.cols());
         assertTrue(512 == dst.rows());

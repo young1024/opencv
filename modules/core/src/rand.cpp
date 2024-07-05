@@ -195,7 +195,7 @@ randf_64f( double* arr, int len, uint64* state, const Vec2d* p, void*, bool )
     hal::addRNGBias64f(arr, &p[0][0], len);
 }
 
-static void randf_16f( float16_t* arr, int len, uint64* state, const Vec2f* p, float* fbuf, bool )
+static void randf_16f( hfloat* arr, int len, uint64* state, const Vec2f* p, float* fbuf, bool )
 {
     uint64 temp = *state;
     for( int i = 0; i < len; i++ )
@@ -215,7 +215,7 @@ static void randf_16f( float16_t* arr, int len, uint64* state, const Vec2f* p, f
 typedef void (*RandFunc)(uchar* arr, int len, uint64* state, const void* p, void* tempbuf, bool small_flag);
 
 
-static RandFunc randTab[][8] =
+static RandFunc randTab[CV_DEPTH_MAX][CV_DEPTH_MAX] =
 {
     {
         (RandFunc)randi_8u, (RandFunc)randi_8s, (RandFunc)randi_16u, (RandFunc)randi_16s,
@@ -574,7 +574,7 @@ void RNG::fill( InputOutputArray _mat, int disttype,
         CV_Assert( scaleFunc != 0 );
     }
     else
-        CV_Error( CV_StsBadArg, "Unknown distribution type" );
+        CV_Error( cv::Error::StsBadArg, "Unknown distribution type" );
 
     const Mat* arrays[] = {&mat, 0};
     uchar* ptr;
@@ -653,7 +653,7 @@ void RNG::fill( InputOutputArray _mat, int disttype,
 
 cv::RNG& cv::theRNG()
 {
-    return getCoreTlsData().get()->rng;
+    return getCoreTlsData().rng;
 }
 
 void cv::setRNGSeed(int seed)
@@ -750,6 +750,9 @@ void cv::randShuffle( InputOutputArray _dst, double iterFactor, RNG* _rng )
     func( dst, rng, iterFactor );
 }
 
+
+#ifndef OPENCV_EXCLUDE_C_API
+
 CV_IMPL void
 cvRandArr( CvRNG* _rng, CvArr* arr, int disttype, CvScalar param1, CvScalar param2 )
 {
@@ -766,6 +769,9 @@ CV_IMPL void cvRandShuffle( CvArr* arr, CvRNG* _rng, double iter_factor )
     cv::RNG& rng = _rng ? (cv::RNG&)*_rng : cv::theRNG();
     cv::randShuffle( dst, iter_factor, &rng );
 }
+
+#endif  // OPENCV_EXCLUDE_C_API
+
 
 // Mersenne Twister random number generator.
 // Inspired by http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/MT2002/CODES/mt19937ar.c

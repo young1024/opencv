@@ -31,9 +31,9 @@
  * size of the object being freed, just in case it's needed.
  */
 
-EXTERN(void *) jpeg_get_small (j_common_ptr cinfo, size_t sizeofobject);
-EXTERN(void) jpeg_free_small (j_common_ptr cinfo, void *object,
-                              size_t sizeofobject);
+EXTERN(void *) jpeg_get_small(j_common_ptr cinfo, size_t sizeofobject);
+EXTERN(void) jpeg_free_small(j_common_ptr cinfo, void *object,
+                             size_t sizeofobject);
 
 /*
  * These two functions are used to allocate and release large chunks of
@@ -43,9 +43,9 @@ EXTERN(void) jpeg_free_small (j_common_ptr cinfo, void *object,
  * large chunks.
  */
 
-EXTERN(void *) jpeg_get_large (j_common_ptr cinfo, size_t sizeofobject);
-EXTERN(void) jpeg_free_large (j_common_ptr cinfo, void *object,
-                              size_t sizeofobject);
+EXTERN(void *) jpeg_get_large(j_common_ptr cinfo, size_t sizeofobject);
+EXTERN(void) jpeg_free_large(j_common_ptr cinfo, void *object,
+                             size_t sizeofobject);
 
 /*
  * The macro MAX_ALLOC_CHUNK designates the maximum number of bytes that may
@@ -84,9 +84,9 @@ EXTERN(void) jpeg_free_large (j_common_ptr cinfo, void *object,
  * Conversely, zero may be returned to always use the minimum amount of memory.
  */
 
-EXTERN(size_t) jpeg_mem_available (j_common_ptr cinfo, size_t min_bytes_needed,
-                                   size_t max_bytes_needed,
-                                   size_t already_allocated);
+EXTERN(size_t) jpeg_mem_available(j_common_ptr cinfo, size_t min_bytes_needed,
+                                  size_t max_bytes_needed,
+                                  size_t already_allocated);
 
 
 /*
@@ -97,24 +97,6 @@ EXTERN(size_t) jpeg_mem_available (j_common_ptr cinfo, size_t min_bytes_needed,
  */
 
 #define TEMP_NAME_LENGTH   64   /* max length of a temporary file's name */
-
-
-#ifdef USE_MSDOS_MEMMGR         /* DOS-specific junk */
-
-typedef unsigned short XMSH;    /* type of extended-memory handles */
-typedef unsigned short EMSH;    /* type of expanded-memory handles */
-
-typedef union {
-  short file_handle;            /* DOS file handle if it's a temp file */
-  XMSH xms_handle;              /* handle if it's a chunk of XMS */
-  EMSH ems_handle;              /* handle if it's a chunk of EMS */
-} handle_union;
-
-#endif /* USE_MSDOS_MEMMGR */
-
-#ifdef USE_MAC_MEMMGR           /* Mac-specific junk */
-#include <Files.h>
-#endif /* USE_MAC_MEMMGR */
 
 
 typedef struct backing_store_struct *backing_store_ptr;
@@ -130,22 +112,9 @@ typedef struct backing_store_struct {
   void (*close_backing_store) (j_common_ptr cinfo, backing_store_ptr info);
 
   /* Private fields for system-dependent backing-store management */
-#ifdef USE_MSDOS_MEMMGR
-  /* For the MS-DOS manager (jmemdos.c), we need: */
-  handle_union handle;          /* reference to backing-store storage object */
-  char temp_name[TEMP_NAME_LENGTH]; /* name if it's a file */
-#else
-#ifdef USE_MAC_MEMMGR
-  /* For the Mac manager (jmemmac.c), we need: */
-  short temp_file;              /* file reference number to temp file */
-  FSSpec tempSpec;              /* the FSSpec for the temp file */
-  char temp_name[TEMP_NAME_LENGTH]; /* name if it's a file */
-#else
   /* For a typical implementation with temp files, we need: */
   FILE *temp_file;              /* stdio reference to temp file */
   char temp_name[TEMP_NAME_LENGTH]; /* name of temp file */
-#endif
-#endif
 } backing_store_info;
 
 
@@ -157,9 +126,9 @@ typedef struct backing_store_struct {
  * just take an error exit.)
  */
 
-EXTERN(void) jpeg_open_backing_store (j_common_ptr cinfo,
-                                      backing_store_ptr info,
-                                      long total_bytes_needed);
+EXTERN(void) jpeg_open_backing_store(j_common_ptr cinfo,
+                                     backing_store_ptr info,
+                                     long total_bytes_needed);
 
 
 /*
@@ -174,5 +143,5 @@ EXTERN(void) jpeg_open_backing_store (j_common_ptr cinfo,
  * all opened backing-store objects have been closed.
  */
 
-EXTERN(long) jpeg_mem_init (j_common_ptr cinfo);
-EXTERN(void) jpeg_mem_term (j_common_ptr cinfo);
+EXTERN(long) jpeg_mem_init(j_common_ptr cinfo);
+EXTERN(void) jpeg_mem_term(j_common_ptr cinfo);

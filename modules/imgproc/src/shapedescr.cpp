@@ -60,6 +60,29 @@ static void findCircle3pts(Point2f *pts, Point2f &center, float &radius)
     Point2f midPoint2 = (pts[0] + pts[2]) / 2.0f;
     float c2 = midPoint2.x * v2.x + midPoint2.y * v2.y;
     float det = v1.x * v2.y - v1.y * v2.x;
+    if (fabs(det) <= EPS)
+    {
+        // v1 and v2 are colinear, so the longest distance between any 2 points
+        // is the diameter of the minimum enclosing circle.
+        float d1 = normL2Sqr<float>(pts[0] - pts[1]);
+        float d2 = normL2Sqr<float>(pts[0] - pts[2]);
+        float d3 = normL2Sqr<float>(pts[1] - pts[2]);
+        radius = sqrt(std::max(d1, std::max(d2, d3))) * 0.5f + EPS;
+        if (d1 >= d2 && d1 >= d3)
+        {
+            center = (pts[0] + pts[1]) * 0.5f;
+        }
+        else if (d2 >= d1 && d2 >= d3)
+        {
+            center = (pts[0] + pts[2]) * 0.5f;
+        }
+        else
+        {
+            CV_DbgAssert(d3 >= d1 && d3 >= d2);
+            center = (pts[1] + pts[2]) * 0.5f;
+        }
+        return;
+    }
     float cx = (c1 * v2.y - c2 * v1.y) / det;
     float cy = (v1.x * c2 - v2.x * c1) / det;
     center.x = (float)cx;
@@ -92,7 +115,13 @@ static void findThirdPoint(const PT *pts, int i, int j, Point2f &center, float &
             ptsf[0] = (Point2f)pts[i];
             ptsf[1] = (Point2f)pts[j];
             ptsf[2] = (Point2f)pts[k];
-            findCircle3pts(ptsf, center, radius);
+            Point2f new_center; float new_radius = 0;
+            findCircle3pts(ptsf, new_center, new_radius);
+            if (new_radius > 0)
+            {
+                radius = new_radius;
+                center = new_center;
+            }
         }
     }
 }
@@ -117,7 +146,13 @@ void findSecondPoint(const PT *pts, int i, Point2f &center, float &radius)
         }
         else
         {
-            findThirdPoint(pts, i, j, center, radius);
+            Point2f new_center; float new_radius = 0;
+            findThirdPoint(pts, i, j, new_center, new_radius);
+            if (new_radius > 0)
+            {
+                radius = new_radius;
+                center = new_center;
+            }
         }
     }
 }
@@ -143,7 +178,13 @@ static void findMinEnclosingCircle(const PT *pts, int count, Point2f &center, fl
         }
         else
         {
-            findSecondPoint(pts, i, center, radius);
+            Point2f new_center; float new_radius = 0;
+            findSecondPoint(pts, i, new_center, new_radius);
+            if (new_radius > 0)
+            {
+                radius = new_radius;
+                center = new_center;
+            }
         }
     }
 }
@@ -296,8 +337,15 @@ double cv::contourArea( InputArray _contour, bool oriented )
     return a00;
 }
 
+namespace cv
+{
 
-cv::RotatedRect cv::fitEllipse( InputArray _points )
+static inline Point2f getOfs(int i, float eps)
+{
+    return Point2f(((i & 1)*2 - 1)*eps, ((i & 2) - 1)*eps);
+}
+
+static RotatedRect fitEllipseNoDirect( InputArray _points )
 {
     CV_INSTRUMENT_REGION();
 
@@ -309,46 +357,88 @@ cv::RotatedRect cv::fitEllipse( InputArray _points )
     RotatedRect box;
 
     if( n < 5 )
-        CV_Error( CV_StsBadSize, "There should be at least 5 points to fit the ellipse" );
+        CV_Error( cv::Error::StsBadSize, "There should be at least 5 points to fit the ellipse" );
 
     // New fitellipse algorithm, contributed by Dr. Daniel Weiss
     Point2f c(0,0);
-    double gfp[5] = {0}, rp[5] = {0}, t;
+    double gfp[5] = {0}, rp[5] = {0}, t, vd[25]={0}, wd[5]={0};
     const double min_eps = 1e-8;
     bool is_float = depth == CV_32F;
-    const Point* ptsi = points.ptr<Point>();
-    const Point2f* ptsf = points.ptr<Point2f>();
 
-    AutoBuffer<double> _Ad(n*5), _bd(n);
-    double *Ad = _Ad.data(), *bd = _bd.data();
+    AutoBuffer<double> _Ad(n*12+n);
+    double *Ad = _Ad.data(), *ud = Ad + n*5, *bd = ud + n*5;
+    Point2f* ptsf_copy = (Point2f*)(bd + n);
 
     // first fit for parameters A - E
     Mat A( n, 5, CV_64F, Ad );
     Mat b( n, 1, CV_64F, bd );
     Mat x( 5, 1, CV_64F, gfp );
+    Mat u( n, 1, CV_64F, ud );
+    Mat vt( 5, 5, CV_64F, vd );
+    Mat w( 5, 1, CV_64F, wd );
 
+    {
+    const Point* ptsi = points.ptr<Point>();
+    const Point2f* ptsf = points.ptr<Point2f>();
     for( i = 0; i < n; i++ )
     {
         Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+        ptsf_copy[i] = p;
         c += p;
+    }
     }
     c.x /= n;
     c.y /= n;
 
+    double s = 0;
     for( i = 0; i < n; i++ )
     {
-        Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+        Point2f p = ptsf_copy[i];
         p -= c;
+        s += fabs(p.x) + fabs(p.y);
+    }
+    double scale = 100./(s > FLT_EPSILON ? s : FLT_EPSILON);
+
+    for( i = 0; i < n; i++ )
+    {
+        Point2f p = ptsf_copy[i];
+        p -= c;
+        double px = p.x*scale;
+        double py = p.y*scale;
 
         bd[i] = 10000.0; // 1.0?
-        Ad[i*5] = -(double)p.x * p.x; // A - C signs inverted as proposed by APP
-        Ad[i*5 + 1] = -(double)p.y * p.y;
-        Ad[i*5 + 2] = -(double)p.x * p.y;
-        Ad[i*5 + 3] = p.x;
-        Ad[i*5 + 4] = p.y;
+        Ad[i*5] = -px * px; // A - C signs inverted as proposed by APP
+        Ad[i*5 + 1] = -py * py;
+        Ad[i*5 + 2] = -px * py;
+        Ad[i*5 + 3] = px;
+        Ad[i*5 + 4] = py;
     }
 
-    solve(A, b, x, DECOMP_SVD);
+    SVDecomp(A, w, u, vt);
+    if(wd[0]*FLT_EPSILON > wd[4]) {
+        float eps = (float)(s/(n*2)*1e-3);
+        for( i = 0; i < n; i++ )
+        {
+            Point2f p = ptsf_copy[i] + getOfs(i, eps);
+            ptsf_copy[i] = p;
+        }
+
+        for( i = 0; i < n; i++ )
+        {
+            Point2f p = ptsf_copy[i];
+            p -= c;
+            double px = p.x*scale;
+            double py = p.y*scale;
+            bd[i] = 10000.0; // 1.0?
+            Ad[i*5] = -px * px; // A - C signs inverted as proposed by APP
+            Ad[i*5 + 1] = -py * py;
+            Ad[i*5 + 2] = -px * py;
+            Ad[i*5 + 3] = px;
+            Ad[i*5 + 4] = py;
+        }
+        SVDecomp(A, w, u, vt);
+    }
+    SVBackSubst(w, u, vt, b, x);
 
     // now use general-form parameters A - E to find the ellipse center:
     // differentiate general form wrt x/y to get two equations for cx and cy
@@ -368,12 +458,14 @@ cv::RotatedRect cv::fitEllipse( InputArray _points )
     x = Mat( 3, 1, CV_64F, gfp );
     for( i = 0; i < n; i++ )
     {
-        Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+        Point2f p = ptsf_copy[i];
         p -= c;
+        double px = p.x*scale;
+        double py = p.y*scale;
         bd[i] = 1.0;
-        Ad[i * 3] = (p.x - rp[0]) * (p.x - rp[0]);
-        Ad[i * 3 + 1] = (p.y - rp[1]) * (p.y - rp[1]);
-        Ad[i * 3 + 2] = (p.x - rp[0]) * (p.y - rp[1]);
+        Ad[i * 3] = (px - rp[0]) * (px - rp[0]);
+        Ad[i * 3 + 1] = (py - rp[1]) * (py - rp[1]);
+        Ad[i * 3 + 2] = (px - rp[0]) * (py - rp[1]);
     }
     solve(A, b, x, DECOMP_SVD);
 
@@ -390,10 +482,10 @@ cv::RotatedRect cv::fitEllipse( InputArray _points )
     if( rp[3] > min_eps )
         rp[3] = std::sqrt(2.0 / rp[3]);
 
-    box.center.x = (float)rp[0] + c.x;
-    box.center.y = (float)rp[1] + c.y;
-    box.size.width = (float)(rp[2]*2);
-    box.size.height = (float)(rp[3]*2);
+    box.center.x = (float)(rp[0]/scale) + c.x;
+    box.center.y = (float)(rp[1]/scale) + c.y;
+    box.size.width = (float)(rp[2]*2/scale);
+    box.size.height = (float)(rp[3]*2/scale);
     if( box.size.width > box.size.height )
     {
         float tmp;
@@ -407,6 +499,16 @@ cv::RotatedRect cv::fitEllipse( InputArray _points )
 
     return box;
 }
+}
+
+cv::RotatedRect cv::fitEllipse( InputArray _points )
+{
+    CV_INSTRUMENT_REGION();
+
+    Mat points = _points.getMat();
+    int n = points.checkVector(2);
+    return n == 5 ? fitEllipseDirect(points) : fitEllipseNoDirect(points);
+}
 
 cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
 {
@@ -418,7 +520,7 @@ cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
     RotatedRect box;
 
     if( n < 5 )
-        CV_Error( CV_StsBadSize, "There should be at least 5 points to fit the ellipse" );
+        CV_Error( cv::Error::StsBadSize, "There should be at least 5 points to fit the ellipse" );
 
     Point2f c(0,0);
 
@@ -442,16 +544,24 @@ cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
     c.x /= (float)n;
     c.y /= (float)n;
 
+    double s = 0;
     for( i = 0; i < n; i++ )
     {
         Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-        p -= c;
+        s += fabs(p.x - c.x) + fabs(p.y - c.y);
+    }
+    double scale = 100./(s > FLT_EPSILON ? s : (double)FLT_EPSILON);
 
-        A.at<double>(i,0) = (double)(p.x)*(p.x);
-        A.at<double>(i,1) = (double)(p.x)*(p.y);
-        A.at<double>(i,2) = (double)(p.y)*(p.y);
-        A.at<double>(i,3) = (double)p.x;
-        A.at<double>(i,4) = (double)p.y;
+    for( i = 0; i < n; i++ )
+    {
+        Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+        double px = (p.x - c.x)*scale, py = (p.y - c.y)*scale;
+
+        A.at<double>(i,0) = px*px;
+        A.at<double>(i,1) = px*py;
+        A.at<double>(i,2) = py*py;
+        A.at<double>(i,3) = px;
+        A.at<double>(i,4) = py;
         A.at<double>(i,5) = 1.0;
     }
     cv::mulTransposed( A, DM, true, noArray(), 1.0, -1 );
@@ -546,10 +656,10 @@ cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
             double p1 = 2.0*pVec(2) *pVec(3)  - pVec(1) *pVec(4) ;
             double p2 = 2.0*pVec(0) *pVec(4) -(pVec(1) *pVec(3) );
 
-            x0 = p1/l3 + c.x;
-            y0 = p2/l3 + c.y;
-            a = std::sqrt(2.)*sqrt((u1 - 4.0*u2)/((l1 - l2)*l3));
-            b = std::sqrt(2.)*sqrt(-1.0*((u1 - 4.0*u2)/((l1 + l2)*l3)));
+            x0 = p1/l3/scale + c.x;
+            y0 = p2/l3/scale + c.y;
+            a = std::sqrt(2.)*sqrt((u1 - 4.0*u2)/((l1 - l2)*l3))/scale;
+            b = std::sqrt(2.)*sqrt(-1.0*((u1 - 4.0*u2)/((l1 + l2)*l3)))/scale;
             if (pVec(1)  == 0) {
                 if (pVec(0)  < pVec(2) ) {
                     theta = 0;
@@ -560,8 +670,8 @@ cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
                 theta = CV_PI/2. + 0.5*std::atan2(pVec(1) , (pVec(0)  - pVec(2) ));
             }
 
-            box.center.x = (float)x0; // +c.x;
-            box.center.y = (float)y0; // +c.y;
+            box.center.x = (float)x0;
+            box.center.y = (float)y0;
             box.size.width = (float)(2.0*a);
             box.size.height = (float)(2.0*b);
             if( box.size.width > box.size.height )
@@ -578,7 +688,7 @@ cv::RotatedRect cv::fitEllipseAMS( InputArray _points )
             box = cv::fitEllipseDirect( points );
         }
     } else {
-        box = cv::fitEllipse( points );
+        box = cv::fitEllipseNoDirect( points );
     }
 
     return box;
@@ -589,14 +699,15 @@ cv::RotatedRect cv::fitEllipseDirect( InputArray _points )
     Mat points = _points.getMat();
     int i, n = points.checkVector(2);
     int depth = points.depth();
+    float eps = 0;
     CV_Assert( n >= 0 && (depth == CV_32F || depth == CV_32S));
 
     RotatedRect box;
 
     if( n < 5 )
-        CV_Error( CV_StsBadSize, "There should be at least 5 points to fit the ellipse" );
+        CV_Error( cv::Error::StsBadSize, "There should be at least 5 points to fit the ellipse" );
 
-    Point2f c(0,0);
+    Point2d c(0., 0.);
 
     bool is_float = (depth == CV_32F);
     const Point*   ptsi = points.ptr<Point>();
@@ -608,63 +719,83 @@ cv::RotatedRect cv::fitEllipseDirect( InputArray _points )
     Matx<double, 3, 1> pVec;
 
     double x0, y0, a, b, theta, Ts;
+    double s = 0;
 
     for( i = 0; i < n; i++ )
     {
         Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-        c += p;
+        c.x += p.x;
+        c.y += p.y;
     }
-    c.x /= (float)n;
-    c.y /= (float)n;
+    c.x /= n;
+    c.y /= n;
 
     for( i = 0; i < n; i++ )
     {
         Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-        p -= c;
-
-        A.at<double>(i,0) = (double)(p.x)*(p.x);
-        A.at<double>(i,1) = (double)(p.x)*(p.y);
-        A.at<double>(i,2) = (double)(p.y)*(p.y);
-        A.at<double>(i,3) = (double)p.x;
-        A.at<double>(i,4) = (double)p.y;
-        A.at<double>(i,5) = 1.0;
+        s += fabs(p.x - c.x) + fabs(p.y - c.y);
     }
-    cv::mulTransposed( A, DM, true, noArray(), 1.0, -1 );
-    DM *= (1.0/n);
+    double scale = 100./(s > FLT_EPSILON ? s : (double)FLT_EPSILON);
 
-    TM(0,0) = DM(0,5)*DM(3,5)*DM(4,4) - DM(0,5)*DM(3,4)*DM(4,5) - DM(0,4)*DM(3,5)*DM(5,4) + \
-              DM(0,3)*DM(4,5)*DM(5,4) + DM(0,4)*DM(3,4)*DM(5,5) - DM(0,3)*DM(4,4)*DM(5,5);
-    TM(0,1) = DM(1,5)*DM(3,5)*DM(4,4) - DM(1,5)*DM(3,4)*DM(4,5) - DM(1,4)*DM(3,5)*DM(5,4) + \
-              DM(1,3)*DM(4,5)*DM(5,4) + DM(1,4)*DM(3,4)*DM(5,5) - DM(1,3)*DM(4,4)*DM(5,5);
-    TM(0,2) = DM(2,5)*DM(3,5)*DM(4,4) - DM(2,5)*DM(3,4)*DM(4,5) - DM(2,4)*DM(3,5)*DM(5,4) + \
-              DM(2,3)*DM(4,5)*DM(5,4) + DM(2,4)*DM(3,4)*DM(5,5) - DM(2,3)*DM(4,4)*DM(5,5);
-    TM(1,0) = DM(0,5)*DM(3,3)*DM(4,5) - DM(0,5)*DM(3,5)*DM(4,3) + DM(0,4)*DM(3,5)*DM(5,3) - \
-              DM(0,3)*DM(4,5)*DM(5,3) - DM(0,4)*DM(3,3)*DM(5,5) + DM(0,3)*DM(4,3)*DM(5,5);
-    TM(1,1) = DM(1,5)*DM(3,3)*DM(4,5) - DM(1,5)*DM(3,5)*DM(4,3) + DM(1,4)*DM(3,5)*DM(5,3) - \
-              DM(1,3)*DM(4,5)*DM(5,3) - DM(1,4)*DM(3,3)*DM(5,5) + DM(1,3)*DM(4,3)*DM(5,5);
-    TM(1,2) = DM(2,5)*DM(3,3)*DM(4,5) - DM(2,5)*DM(3,5)*DM(4,3) + DM(2,4)*DM(3,5)*DM(5,3) - \
-              DM(2,3)*DM(4,5)*DM(5,3) - DM(2,4)*DM(3,3)*DM(5,5) + DM(2,3)*DM(4,3)*DM(5,5);
-    TM(2,0) = DM(0,5)*DM(3,4)*DM(4,3) - DM(0,5)*DM(3,3)*DM(4,4) - DM(0,4)*DM(3,4)*DM(5,3) + \
-              DM(0,3)*DM(4,4)*DM(5,3) + DM(0,4)*DM(3,3)*DM(5,4) - DM(0,3)*DM(4,3)*DM(5,4);
-    TM(2,1) = DM(1,5)*DM(3,4)*DM(4,3) - DM(1,5)*DM(3,3)*DM(4,4) - DM(1,4)*DM(3,4)*DM(5,3) + \
-              DM(1,3)*DM(4,4)*DM(5,3) + DM(1,4)*DM(3,3)*DM(5,4) - DM(1,3)*DM(4,3)*DM(5,4);
-    TM(2,2) = DM(2,5)*DM(3,4)*DM(4,3) - DM(2,5)*DM(3,3)*DM(4,4) - DM(2,4)*DM(3,4)*DM(5,3) + \
-              DM(2,3)*DM(4,4)*DM(5,3) + DM(2,4)*DM(3,3)*DM(5,4) - DM(2,3)*DM(4,3)*DM(5,4);
+    // first, try the original pointset.
+    // if it's singular, try to shift the points a bit
+    int iter = 0;
+    for( iter = 0; iter < 2; iter++ ) {
+        for( i = 0; i < n; i++ )
+        {
+            Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+            Point2f delta = getOfs(i, eps);
+            double px = (p.x + delta.x - c.x)*scale, py = (p.y + delta.y - c.y)*scale;
 
-    Ts=(-(DM(3,5)*DM(4,4)*DM(5,3)) + DM(3,4)*DM(4,5)*DM(5,3) + DM(3,5)*DM(4,3)*DM(5,4) - \
-          DM(3,3)*DM(4,5)*DM(5,4)  - DM(3,4)*DM(4,3)*DM(5,5) + DM(3,3)*DM(4,4)*DM(5,5));
+            A.at<double>(i,0) = px*px;
+            A.at<double>(i,1) = px*py;
+            A.at<double>(i,2) = py*py;
+            A.at<double>(i,3) = px;
+            A.at<double>(i,4) = py;
+            A.at<double>(i,5) = 1.0;
+        }
+        cv::mulTransposed( A, DM, true, noArray(), 1.0, -1 );
+        DM *= (1.0/n);
 
-    M(0,0) = (DM(2,0) + (DM(2,3)*TM(0,0) + DM(2,4)*TM(1,0) + DM(2,5)*TM(2,0))/Ts)/2.;
-    M(0,1) = (DM(2,1) + (DM(2,3)*TM(0,1) + DM(2,4)*TM(1,1) + DM(2,5)*TM(2,1))/Ts)/2.;
-    M(0,2) = (DM(2,2) + (DM(2,3)*TM(0,2) + DM(2,4)*TM(1,2) + DM(2,5)*TM(2,2))/Ts)/2.;
-    M(1,0) = -DM(1,0) - (DM(1,3)*TM(0,0) + DM(1,4)*TM(1,0) + DM(1,5)*TM(2,0))/Ts;
-    M(1,1) = -DM(1,1) - (DM(1,3)*TM(0,1) + DM(1,4)*TM(1,1) + DM(1,5)*TM(2,1))/Ts;
-    M(1,2) = -DM(1,2) - (DM(1,3)*TM(0,2) + DM(1,4)*TM(1,2) + DM(1,5)*TM(2,2))/Ts;
-    M(2,0) = (DM(0,0) + (DM(0,3)*TM(0,0) + DM(0,4)*TM(1,0) + DM(0,5)*TM(2,0))/Ts)/2.;
-    M(2,1) = (DM(0,1) + (DM(0,3)*TM(0,1) + DM(0,4)*TM(1,1) + DM(0,5)*TM(2,1))/Ts)/2.;
-    M(2,2) = (DM(0,2) + (DM(0,3)*TM(0,2) + DM(0,4)*TM(1,2) + DM(0,5)*TM(2,2))/Ts)/2.;
+        TM(0,0) = DM(0,5)*DM(3,5)*DM(4,4) - DM(0,5)*DM(3,4)*DM(4,5) - DM(0,4)*DM(3,5)*DM(5,4) + \
+                  DM(0,3)*DM(4,5)*DM(5,4) + DM(0,4)*DM(3,4)*DM(5,5) - DM(0,3)*DM(4,4)*DM(5,5);
+        TM(0,1) = DM(1,5)*DM(3,5)*DM(4,4) - DM(1,5)*DM(3,4)*DM(4,5) - DM(1,4)*DM(3,5)*DM(5,4) + \
+                  DM(1,3)*DM(4,5)*DM(5,4) + DM(1,4)*DM(3,4)*DM(5,5) - DM(1,3)*DM(4,4)*DM(5,5);
+        TM(0,2) = DM(2,5)*DM(3,5)*DM(4,4) - DM(2,5)*DM(3,4)*DM(4,5) - DM(2,4)*DM(3,5)*DM(5,4) + \
+                  DM(2,3)*DM(4,5)*DM(5,4) + DM(2,4)*DM(3,4)*DM(5,5) - DM(2,3)*DM(4,4)*DM(5,5);
+        TM(1,0) = DM(0,5)*DM(3,3)*DM(4,5) - DM(0,5)*DM(3,5)*DM(4,3) + DM(0,4)*DM(3,5)*DM(5,3) - \
+                  DM(0,3)*DM(4,5)*DM(5,3) - DM(0,4)*DM(3,3)*DM(5,5) + DM(0,3)*DM(4,3)*DM(5,5);
+        TM(1,1) = DM(1,5)*DM(3,3)*DM(4,5) - DM(1,5)*DM(3,5)*DM(4,3) + DM(1,4)*DM(3,5)*DM(5,3) - \
+                  DM(1,3)*DM(4,5)*DM(5,3) - DM(1,4)*DM(3,3)*DM(5,5) + DM(1,3)*DM(4,3)*DM(5,5);
+        TM(1,2) = DM(2,5)*DM(3,3)*DM(4,5) - DM(2,5)*DM(3,5)*DM(4,3) + DM(2,4)*DM(3,5)*DM(5,3) - \
+                  DM(2,3)*DM(4,5)*DM(5,3) - DM(2,4)*DM(3,3)*DM(5,5) + DM(2,3)*DM(4,3)*DM(5,5);
+        TM(2,0) = DM(0,5)*DM(3,4)*DM(4,3) - DM(0,5)*DM(3,3)*DM(4,4) - DM(0,4)*DM(3,4)*DM(5,3) + \
+                  DM(0,3)*DM(4,4)*DM(5,3) + DM(0,4)*DM(3,3)*DM(5,4) - DM(0,3)*DM(4,3)*DM(5,4);
+        TM(2,1) = DM(1,5)*DM(3,4)*DM(4,3) - DM(1,5)*DM(3,3)*DM(4,4) - DM(1,4)*DM(3,4)*DM(5,3) + \
+                  DM(1,3)*DM(4,4)*DM(5,3) + DM(1,4)*DM(3,3)*DM(5,4) - DM(1,3)*DM(4,3)*DM(5,4);
+        TM(2,2) = DM(2,5)*DM(3,4)*DM(4,3) - DM(2,5)*DM(3,3)*DM(4,4) - DM(2,4)*DM(3,4)*DM(5,3) + \
+                  DM(2,3)*DM(4,4)*DM(5,3) + DM(2,4)*DM(3,3)*DM(5,4) - DM(2,3)*DM(4,3)*DM(5,4);
 
-    if (fabs(cv::determinant(M)) > 1.0e-10) {
+        Ts=(-(DM(3,5)*DM(4,4)*DM(5,3)) + DM(3,4)*DM(4,5)*DM(5,3) + DM(3,5)*DM(4,3)*DM(5,4) - \
+              DM(3,3)*DM(4,5)*DM(5,4)  - DM(3,4)*DM(4,3)*DM(5,5) + DM(3,3)*DM(4,4)*DM(5,5));
+
+        M(0,0) = (DM(2,0) + (DM(2,3)*TM(0,0) + DM(2,4)*TM(1,0) + DM(2,5)*TM(2,0))/Ts)/2.;
+        M(0,1) = (DM(2,1) + (DM(2,3)*TM(0,1) + DM(2,4)*TM(1,1) + DM(2,5)*TM(2,1))/Ts)/2.;
+        M(0,2) = (DM(2,2) + (DM(2,3)*TM(0,2) + DM(2,4)*TM(1,2) + DM(2,5)*TM(2,2))/Ts)/2.;
+        M(1,0) = -DM(1,0) - (DM(1,3)*TM(0,0) + DM(1,4)*TM(1,0) + DM(1,5)*TM(2,0))/Ts;
+        M(1,1) = -DM(1,1) - (DM(1,3)*TM(0,1) + DM(1,4)*TM(1,1) + DM(1,5)*TM(2,1))/Ts;
+        M(1,2) = -DM(1,2) - (DM(1,3)*TM(0,2) + DM(1,4)*TM(1,2) + DM(1,5)*TM(2,2))/Ts;
+        M(2,0) = (DM(0,0) + (DM(0,3)*TM(0,0) + DM(0,4)*TM(1,0) + DM(0,5)*TM(2,0))/Ts)/2.;
+        M(2,1) = (DM(0,1) + (DM(0,3)*TM(0,1) + DM(0,4)*TM(1,1) + DM(0,5)*TM(2,1))/Ts)/2.;
+        M(2,2) = (DM(0,2) + (DM(0,3)*TM(0,2) + DM(0,4)*TM(1,2) + DM(0,5)*TM(2,2))/Ts)/2.;
+
+        double det = fabs(cv::determinant(M));
+        if (fabs(det) > 1.0e-10)
+            break;
+        eps = (float)(s/(n*2)*1e-2);
+    }
+
+    if( iter < 2 ) {
         Mat eVal, eVec;
         eigenNonSymmetric(M, eVal, eVec);
 
@@ -699,10 +830,10 @@ cv::RotatedRect cv::fitEllipseDirect( InputArray _points )
         double p1 = 2*pVec(2)*Q(0,0) - pVec(1)*Q(0,1);
         double p2 = 2*pVec(0)*Q(0,1) - pVec(1)*Q(0,0);
 
-        x0 = p1/l3 + c.x;
-        y0 = p2/l3 + c.y;
-        a = sqrt(2.)*sqrt((u1 - 4.0*u2)/((l1 - l2)*l3));
-        b = sqrt(2.)*sqrt(-1.0*((u1 - 4.0*u2)/((l1 + l2)*l3)));
+        x0 = (p1/l3/scale) + c.x;
+        y0 = (p2/l3/scale) + c.y;
+        a = sqrt(2.)*sqrt((u1 - 4.0*u2)/((l1 - l2)*l3))/scale;
+        b = sqrt(2.)*sqrt(-1.0*((u1 - 4.0*u2)/((l1 + l2)*l3)))/scale;
         if (pVec(1)  == 0) {
             if (pVec(0)  < pVec(2) ) {
                 theta = 0;
@@ -726,289 +857,9 @@ cv::RotatedRect cv::fitEllipseDirect( InputArray _points )
             box.angle = (float)(fmod(theta*180/CV_PI,180.0));
         };
     } else {
-        box = cv::fitEllipse( points );
+        box = cv::fitEllipseNoDirect( points );
     }
     return box;
-}
-
-
-namespace cv
-{
-
-// Calculates bounding rectagnle of a point set or retrieves already calculated
-static Rect pointSetBoundingRect( const Mat& points )
-{
-    int npoints = points.checkVector(2);
-    int depth = points.depth();
-    CV_Assert(npoints >= 0 && (depth == CV_32F || depth == CV_32S));
-
-    int  xmin = 0, ymin = 0, xmax = -1, ymax = -1, i;
-    bool is_float = depth == CV_32F;
-
-    if( npoints == 0 )
-        return Rect();
-
-#if CV_SIMD
-    const int64_t* pts = points.ptr<int64_t>();
-
-    if( !is_float )
-    {
-        v_int32 minval, maxval;
-        minval = maxval = v_reinterpret_as_s32(vx_setall_s64(*pts)); //min[0]=pt.x, min[1]=pt.y, min[2]=pt.x, min[3]=pt.y
-        for( i = 1; i <= npoints - v_int32::nlanes/2; i+= v_int32::nlanes/2 )
-        {
-            v_int32 ptXY2 = v_reinterpret_as_s32(vx_load(pts + i));
-            minval = v_min(ptXY2, minval);
-            maxval = v_max(ptXY2, maxval);
-        }
-        minval = v_min(v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(minval))), v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(minval))));
-        maxval = v_max(v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(maxval))), v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(maxval))));
-        if( i <= npoints - v_int32::nlanes/4 )
-        {
-            v_int32 ptXY = v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(vx_load_low(pts + i))));
-            minval = v_min(ptXY, minval);
-            maxval = v_max(ptXY, maxval);
-            i += v_int64::nlanes/2;
-        }
-        for(int j = 16; j < CV_SIMD_WIDTH; j*=2)
-        {
-            minval = v_min(v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(minval))), v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(minval))));
-            maxval = v_max(v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(maxval))), v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(maxval))));
-        }
-        xmin = minval.get0();
-        xmax = maxval.get0();
-        ymin = v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(minval))).get0();
-        ymax = v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(maxval))).get0();
-#if CV_SIMD_WIDTH > 16
-        if( i < npoints )
-        {
-            v_int32x4 minval2, maxval2;
-            minval2 = maxval2 = v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(v_load_low(pts + i))));
-            for( i++; i < npoints; i++ )
-            {
-                v_int32x4 ptXY = v_reinterpret_as_s32(v_expand_low(v_reinterpret_as_u32(v_load_low(pts + i))));
-                minval2 = v_min(ptXY, minval2);
-                maxval2 = v_max(ptXY, maxval2);
-            }
-            xmin = min(xmin, minval2.get0());
-            xmax = max(xmax, maxval2.get0());
-            ymin = min(ymin, v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(minval2))).get0());
-            ymax = max(ymax, v_reinterpret_as_s32(v_expand_high(v_reinterpret_as_u32(maxval2))).get0());
-        }
-#endif
-    }
-    else
-    {
-        v_float32 minval, maxval;
-        minval = maxval = v_reinterpret_as_f32(vx_setall_s64(*pts)); //min[0]=pt.x, min[1]=pt.y, min[2]=pt.x, min[3]=pt.y
-        for( i = 1; i <= npoints - v_float32::nlanes/2; i+= v_float32::nlanes/2 )
-        {
-            v_float32 ptXY2 = v_reinterpret_as_f32(vx_load(pts + i));
-            minval = v_min(ptXY2, minval);
-            maxval = v_max(ptXY2, maxval);
-        }
-        minval = v_min(v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(minval))), v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(minval))));
-        maxval = v_max(v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(maxval))), v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(maxval))));
-        if( i <= npoints - v_float32::nlanes/4 )
-        {
-            v_float32 ptXY = v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(vx_load_low(pts + i))));
-            minval = v_min(ptXY, minval);
-            maxval = v_max(ptXY, maxval);
-            i += v_float32::nlanes/4;
-        }
-        for(int j = 16; j < CV_SIMD_WIDTH; j*=2)
-        {
-            minval = v_min(v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(minval))), v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(minval))));
-            maxval = v_max(v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(maxval))), v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(maxval))));
-        }
-        xmin = cvFloor(minval.get0());
-        xmax = cvFloor(maxval.get0());
-        ymin = cvFloor(v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(minval))).get0());
-        ymax = cvFloor(v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(maxval))).get0());
-#if CV_SIMD_WIDTH > 16
-        if( i < npoints )
-        {
-            v_float32x4 minval2, maxval2;
-            minval2 = maxval2 = v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(v_load_low(pts + i))));
-            for( i++; i < npoints; i++ )
-            {
-                v_float32x4 ptXY = v_reinterpret_as_f32(v_expand_low(v_reinterpret_as_u32(v_load_low(pts + i))));
-                minval2 = v_min(ptXY, minval2);
-                maxval2 = v_max(ptXY, maxval2);
-            }
-            xmin = min(xmin, cvFloor(minval2.get0()));
-            xmax = max(xmax, cvFloor(maxval2.get0()));
-            ymin = min(ymin, cvFloor(v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(minval2))).get0()));
-            ymax = max(ymax, cvFloor(v_reinterpret_as_f32(v_expand_high(v_reinterpret_as_u32(maxval2))).get0()));
-        }
-#endif
-    }
-#else
-    const Point* pts = points.ptr<Point>();
-    Point pt = pts[0];
-
-    if( !is_float )
-    {
-        xmin = xmax = pt.x;
-        ymin = ymax = pt.y;
-
-        for( i = 1; i < npoints; i++ )
-        {
-            pt = pts[i];
-
-            if( xmin > pt.x )
-                xmin = pt.x;
-
-            if( xmax < pt.x )
-                xmax = pt.x;
-
-            if( ymin > pt.y )
-                ymin = pt.y;
-
-            if( ymax < pt.y )
-                ymax = pt.y;
-        }
-    }
-    else
-    {
-        Cv32suf v;
-        // init values
-        xmin = xmax = CV_TOGGLE_FLT(pt.x);
-        ymin = ymax = CV_TOGGLE_FLT(pt.y);
-
-        for( i = 1; i < npoints; i++ )
-        {
-            pt = pts[i];
-            pt.x = CV_TOGGLE_FLT(pt.x);
-            pt.y = CV_TOGGLE_FLT(pt.y);
-
-            if( xmin > pt.x )
-                xmin = pt.x;
-
-            if( xmax < pt.x )
-                xmax = pt.x;
-
-            if( ymin > pt.y )
-                ymin = pt.y;
-
-            if( ymax < pt.y )
-                ymax = pt.y;
-        }
-
-        v.i = CV_TOGGLE_FLT(xmin); xmin = cvFloor(v.f);
-        v.i = CV_TOGGLE_FLT(ymin); ymin = cvFloor(v.f);
-        // because right and bottom sides of the bounding rectangle are not inclusive
-        // (note +1 in width and height calculation below), cvFloor is used here instead of cvCeil
-        v.i = CV_TOGGLE_FLT(xmax); xmax = cvFloor(v.f);
-        v.i = CV_TOGGLE_FLT(ymax); ymax = cvFloor(v.f);
-    }
-#endif
-
-    return Rect(xmin, ymin, xmax - xmin + 1, ymax - ymin + 1);
-}
-
-
-static Rect maskBoundingRect( const Mat& img )
-{
-    CV_Assert( img.depth() <= CV_8S && img.channels() == 1 );
-
-    Size size = img.size();
-    int xmin = size.width, ymin = -1, xmax = -1, ymax = -1, i, j, k;
-
-    for( i = 0; i < size.height; i++ )
-    {
-        const uchar* _ptr = img.ptr(i);
-        const uchar* ptr = (const uchar*)alignPtr(_ptr, 4);
-        int have_nz = 0, k_min, offset = (int)(ptr - _ptr);
-        j = 0;
-        offset = MIN(offset, size.width);
-        for( ; j < offset; j++ )
-            if( _ptr[j] )
-            {
-                have_nz = 1;
-                break;
-            }
-        if( j < offset )
-        {
-            if( j < xmin )
-                xmin = j;
-            if( j > xmax )
-                xmax = j;
-        }
-        if( offset < size.width )
-        {
-            xmin -= offset;
-            xmax -= offset;
-            size.width -= offset;
-            j = 0;
-            for( ; j <= xmin - 4; j += 4 )
-                if( *((int*)(ptr+j)) )
-                    break;
-            for( ; j < xmin; j++ )
-                if( ptr[j] )
-                {
-                    xmin = j;
-                    if( j > xmax )
-                        xmax = j;
-                    have_nz = 1;
-                    break;
-                }
-            k_min = MAX(j-1, xmax);
-            k = size.width - 1;
-            for( ; k > k_min && (k&3) != 3; k-- )
-                if( ptr[k] )
-                    break;
-            if( k > k_min && (k&3) == 3 )
-            {
-                for( ; k > k_min+3; k -= 4 )
-                    if( *((int*)(ptr+k-3)) )
-                        break;
-            }
-            for( ; k > k_min; k-- )
-                if( ptr[k] )
-                {
-                    xmax = k;
-                    have_nz = 1;
-                    break;
-                }
-            if( !have_nz )
-            {
-                j &= ~3;
-                for( ; j <= k - 3; j += 4 )
-                    if( *((int*)(ptr+j)) )
-                        break;
-                for( ; j <= k; j++ )
-                    if( ptr[j] )
-                    {
-                        have_nz = 1;
-                        break;
-                    }
-            }
-            xmin += offset;
-            xmax += offset;
-            size.width += offset;
-        }
-        if( have_nz )
-        {
-            if( ymin < 0 )
-                ymin = i;
-            ymax = i;
-        }
-    }
-
-    if( xmin >= size.width )
-        xmin = ymin = 0;
-    return Rect(xmin, ymin, xmax - xmin + 1, ymax - ymin + 1);
-}
-
-}
-
-cv::Rect cv::boundingRect(InputArray array)
-{
-    CV_INSTRUMENT_REGION();
-
-    Mat m = array.getMat();
-    return m.depth() <= CV_8U ? maskBoundingRect(m) : pointSetBoundingRect(m);
 }
 
 ////////////////////////////////////////////// C API ///////////////////////////////////////////
@@ -1233,7 +1084,7 @@ cvContourArea( const void *array, CvSlice slice, int oriented )
     {
         contour = (CvSeq*)array;
         if( !CV_IS_SEQ_POLYLINE( contour ))
-            CV_Error( CV_StsBadArg, "Unsupported sequence type" );
+            CV_Error( cv::Error::StsBadArg, "Unsupported sequence type" );
     }
     else
     {
@@ -1248,7 +1099,7 @@ cvContourArea( const void *array, CvSlice slice, int oriented )
     }
 
     if( CV_SEQ_ELTYPE( contour ) != CV_32SC2 )
-        CV_Error( CV_StsUnsupportedFormat,
+        CV_Error( cv::Error::StsUnsupportedFormat,
         "Only curves with integer coordinates are supported in case of contour slice" );
     area = icvContourSecArea( contour, slice );
     return oriented ? area : fabs(area);
@@ -1274,7 +1125,7 @@ cvArcLength( const void *array, CvSlice slice, int is_closed )
     {
         contour = (CvSeq*)array;
         if( !CV_IS_SEQ_POLYLINE( contour ))
-            CV_Error( CV_StsBadArg, "Unsupported sequence type" );
+            CV_Error( cv::Error::StsBadArg, "Unsupported sequence type" );
         if( is_closed < 0 )
             is_closed = CV_IS_SEQ_CLOSED( contour );
     }
@@ -1349,64 +1200,6 @@ cvFitEllipse2( const CvArr* array )
     cv::AutoBuffer<double> abuf;
     cv::Mat points = cv::cvarrToMat(array, false, false, 0, &abuf);
     return cvBox2D(cv::fitEllipse(points));
-}
-
-/* Calculates bounding rectagnle of a point set or retrieves already calculated */
-CV_IMPL  CvRect
-cvBoundingRect( CvArr* array, int update )
-{
-    cv::Rect rect;
-    CvContour contour_header;
-    CvSeq* ptseq = 0;
-    CvSeqBlock block;
-
-    CvMat stub, *mat = 0;
-    int calculate = update;
-
-    if( CV_IS_SEQ( array ))
-    {
-        ptseq = (CvSeq*)array;
-        if( !CV_IS_SEQ_POINT_SET( ptseq ))
-            CV_Error( CV_StsBadArg, "Unsupported sequence type" );
-
-        if( ptseq->header_size < (int)sizeof(CvContour))
-        {
-            update = 0;
-            calculate = 1;
-        }
-    }
-    else
-    {
-        mat = cvGetMat( array, &stub );
-        if( CV_MAT_TYPE(mat->type) == CV_32SC2 ||
-            CV_MAT_TYPE(mat->type) == CV_32FC2 )
-        {
-            ptseq = cvPointSeqFromMat(CV_SEQ_KIND_GENERIC, mat, &contour_header, &block);
-            mat = 0;
-        }
-        else if( CV_MAT_TYPE(mat->type) != CV_8UC1 &&
-                CV_MAT_TYPE(mat->type) != CV_8SC1 )
-            CV_Error( CV_StsUnsupportedFormat,
-                "The image/matrix format is not supported by the function" );
-        update = 0;
-        calculate = 1;
-    }
-
-    if( !calculate )
-        return ((CvContour*)ptseq)->rect;
-
-    if( mat )
-    {
-        rect = cvRect(cv::maskBoundingRect(cv::cvarrToMat(mat)));
-    }
-    else if( ptseq->total )
-    {
-        cv::AutoBuffer<double> abuf;
-        rect = cvRect(cv::pointSetBoundingRect(cv::cvarrToMat(ptseq, false, false, 0, &abuf)));
-    }
-    if( update )
-        ((CvContour*)ptseq)->rect = cvRect(rect);
-    return cvRect(rect);
 }
 
 /* End of file. */

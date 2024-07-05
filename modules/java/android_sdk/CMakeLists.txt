@@ -27,10 +27,17 @@ if(ANDROID_SDK_COMPATIBLE_TARGET)
   set(ANDROID_SDK_COMPATIBLE_TARGET "${ANDROID_SDK_COMPATIBLE_TARGET}" CACHE INTERNAL "")
 endif()
 string(REGEX REPLACE "android-" "" android_sdk_target_num ${ANDROID_SDK_COMPATIBLE_TARGET})
+
 if( (ANDROID_SDK_TARGET AND ANDROID_SDK_TARGET LESS 21) OR (android_sdk_target_num LESS 21) )
   message(STATUS "[OpenCV for Android SDK]: A new OpenGL Camera Bridge (CameraGLSurfaceView, CameraGLRendererBase, CameraRenderer, Camera2Renderer) is disabled, because ANDROID_SDK_TARGET (${android_sdk_target_num}) < 21")
 else()
   ocv_copyfiles_append_dir(JAVA_SRC_COPY "${OPENCV_JAVA_BINDINGS_DIR}/gen/android-21/java" "${java_src_dir}")
+endif()
+
+if( (ANDROID_SDK_TARGET AND ANDROID_SDK_TARGET LESS 24) OR (android_sdk_target_num LESS 24) )
+  message(STATUS "[OpenCV for Android SDK]: An experiemntal Native Camera is disabled, because ANDROID_SDK_TARGET (${android_sdk_target_num}) < 24")
+else()
+  ocv_copyfiles_append_dir(JAVA_SRC_COPY "${OPENCV_JAVA_BINDINGS_DIR}/gen/android-24/java" "${java_src_dir}")
 endif()
 
 # copy boilerplate
@@ -44,7 +51,7 @@ foreach(file ${seed_project_files_rel})
 endforeach()
 
 list(APPEND depends gen_opencv_java_source "${OPENCV_DEPHELPER}/gen_opencv_java_source")
-ocv_copyfiles_add_target(${the_module}_android_source_copy JAVA_SRC_COPY "Copy Java(Andoid SDK) source files" ${depends})
+ocv_copyfiles_add_target(${the_module}_android_source_copy JAVA_SRC_COPY "Copy Java(Android SDK) source files" ${depends})
 file(REMOVE "${OPENCV_DEPHELPER}/${the_module}_android_source_copy")  # force rebuild after CMake run
 
 set(depends ${the_module}_android_source_copy "${OPENCV_DEPHELPER}/${the_module}_android_source_copy")
@@ -96,7 +103,11 @@ FILE(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${JAVA_INSTALL_ROOT
 
 ocv_update(ANDROID_COMPILE_SDK_VERSION "27")
 ocv_update(ANDROID_MIN_SDK_VERSION "14")
-ocv_update(ANDROID_TARGET_SDK_VERSION "21")
+if(ANDROID_NATIVE_API_LEVEL GREATER 21)
+  ocv_update(ANDROID_TARGET_SDK_VERSION "${ANDROID_NATIVE_API_LEVEL}")
+else()
+  ocv_update(ANDROID_TARGET_SDK_VERSION "21")
+endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/build.gradle.in" "${CMAKE_CURRENT_BINARY_DIR}/build.gradle" @ONLY)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/build.gradle" DESTINATION ${JAVA_INSTALL_ROOT}/.. COMPONENT java)
 
@@ -109,6 +120,7 @@ else()  # gradle build
 #TODO: INSTALL ONLY
 ocv_copyfiles_append_dir(JAVA_SRC_COPY "${OPENCV_JAVA_BINDINGS_DIR}/gen/android/java" "${java_src_dir}")
 ocv_copyfiles_append_dir(JAVA_SRC_COPY "${OPENCV_JAVA_BINDINGS_DIR}/gen/android-21/java" "${java_src_dir}")
+ocv_copyfiles_append_dir(JAVA_SRC_COPY "${OPENCV_JAVA_BINDINGS_DIR}/gen/android-24/java" "${java_src_dir}")
 
 # copy boilerplate
 set(__base_dir "${CMAKE_CURRENT_SOURCE_DIR}/android_gradle_lib/")
@@ -118,18 +130,29 @@ foreach(file ${seed_project_files_rel})
   configure_file("${__base_dir}/${file}" "${OPENCV_JAVA_DIR}/${file}" @ONLY)
   list(APPEND depends "${__base_dir}/${file}")
   get_filename_component(install_subdir "${file}" PATH)
-  install(FILES "${OPENCV_JAVA_DIR}/${file}" DESTINATION "${JAVA_INSTALL_ROOT}/${install_subdir}" COMPONENT java)
+  if(NOT file STREQUAL "build.gradle")
+    install(FILES "${OPENCV_JAVA_DIR}/${file}" DESTINATION "${JAVA_INSTALL_ROOT}/${install_subdir}" COMPONENT java)
+  endif()
+endforeach()
+
+# copy libcxx_helper
+set(__base_dir "${CMAKE_CURRENT_SOURCE_DIR}/")
+file(GLOB_RECURSE __files_rel RELATIVE "${__base_dir}/" "${__base_dir}/libcxx_helper/*")
+foreach(file ${__files_rel})
+  configure_file("${__base_dir}/${file}" "${OPENCV_JAVA_DIR}/${file}" @ONLY)
+  list(APPEND depends "${__base_dir}/${file}")
+  get_filename_component(install_subdir "${file}" PATH)
+  install(FILES "${OPENCV_JAVA_DIR}/${file}" DESTINATION "${JAVA_INSTALL_ROOT}/../${install_subdir}" COMPONENT java)
 endforeach()
 
 list(APPEND depends gen_opencv_java_source "${OPENCV_DEPHELPER}/gen_opencv_java_source")
-ocv_copyfiles_add_target(${the_module}_android_source_copy JAVA_SRC_COPY "Copy Java(Andoid SDK) source files" ${depends})
+ocv_copyfiles_add_target(${the_module}_android_source_copy JAVA_SRC_COPY "Copy Java(Android SDK) source files" ${depends})
 file(REMOVE "${OPENCV_DEPHELPER}/${the_module}_android_source_copy")  # force rebuild after CMake run
 
 set(depends ${the_module}_android_source_copy "${OPENCV_DEPHELPER}/${the_module}_android_source_copy")
 
 # build jar
 set(AAR_FILE "${OPENCV_JAVA_DIR}/build/outputs/aar/opencv-release.aar")
-ocv_update(OPENCV_GRADLE_VERBOSE_OPTIONS "-i")
 add_custom_command(
     OUTPUT "${AAR_FILE}" "${OPENCV_DEPHELPER}/${the_module}_android"
     COMMAND ./gradlew ${OPENCV_GRADLE_VERBOSE_OPTIONS} "opencv:assemble"

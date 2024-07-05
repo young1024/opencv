@@ -1127,6 +1127,7 @@ inline int TEGRA_FILTERINIT(cvhalFilter2D **context, uchar *kernel_data, size_t 
         {
             std::memcpy(ctx->kernel_data + kernel_width * j, kernel_data + kernel_step * j, kernel_width * sizeof(int16_t));
         }
+        break;
     default:
         delete[] ctx->kernel_data;
         delete ctx;
@@ -1243,6 +1244,7 @@ inline int TEGRA_SEPFILTERINIT(cvhalFilter2D **context, int src_type, int dst_ty
         ctx->kernely_data[0]=((int16_t*)kernely_data)[0];
         ctx->kernely_data[1]=((int16_t*)kernely_data)[1];
         ctx->kernely_data[2]=((int16_t*)kernely_data)[2];
+        break;
     default:
         delete ctx;
         return CV_HAL_ERROR_NOT_IMPLEMENTED;
@@ -1284,7 +1286,6 @@ inline int TEGRA_SEPFILTERFREE(cvhalFilter2D *context)
 #undef cv_hal_sepFilterFree
 #define cv_hal_sepFilterFree TEGRA_SEPFILTERFREE
 
-
 struct MorphCtx
 {
     int operation;
@@ -1294,13 +1295,13 @@ struct MorphCtx
     CAROTENE_NS::BORDER_MODE border;
     uchar borderValues[4];
 };
-inline int TEGRA_MORPHINIT(cvhalFilter2D **context, int operation, int src_type, int dst_type, int, int,
+inline int TEGRA_MORPHINIT(cvhalFilter2D **context, int operation, int src_type, int dst_type, int width, int height,
                            int kernel_type, uchar *kernel_data, size_t kernel_step, int kernel_width, int kernel_height, int anchor_x, int anchor_y,
                            int borderType, const double borderValue[4], int iterations, bool allowSubmatrix, bool allowInplace)
 {
     if(!context || !kernel_data || src_type != dst_type ||
        CV_MAT_DEPTH(src_type) != CV_8U || src_type < 0 || (src_type >> CV_CN_SHIFT) > 3 ||
-
+       width < kernel_width || height < kernel_height ||
        allowSubmatrix || allowInplace || iterations != 1 ||
        !CAROTENE_NS::isSupportedConfiguration())
         return CV_HAL_ERROR_NOT_IMPLEMENTED;
@@ -1776,30 +1777,30 @@ TegraCvtColor_Invoker(bgrx2hsvf, bgrx2hsv, src_data + static_cast<size_t>(range.
     : CV_HAL_ERROR_NOT_IMPLEMENTED \
 )
 
-#define TEGRA_CVT2PYUVTOBGR(src_data, src_step, dst_data, dst_step, dst_width, dst_height, dcn, swapBlue, uIdx) \
+#define TEGRA_CVT2PYUVTOBGR_EX(y_data, y_step, uv_data, uv_step, dst_data, dst_step, dst_width, dst_height, dcn, swapBlue, uIdx) \
 ( \
     CAROTENE_NS::isSupportedConfiguration() ? \
         dcn == 3 ? \
             uIdx == 0 ? \
                 (swapBlue ? \
                     CAROTENE_NS::yuv420i2rgb(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                             src_data, src_step, \
-                                             src_data + src_step * dst_height, src_step, \
+                                             y_data, y_step, \
+                                             uv_data, uv_step, \
                                              dst_data, dst_step) : \
                     CAROTENE_NS::yuv420i2bgr(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                             src_data, src_step, \
-                                             src_data + src_step * dst_height, src_step, \
+                                             y_data, y_step, \
+                                             uv_data, uv_step, \
                                              dst_data, dst_step)), \
                 CV_HAL_ERROR_OK : \
             uIdx == 1 ? \
                 (swapBlue ? \
                     CAROTENE_NS::yuv420sp2rgb(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                              src_data, src_step, \
-                                              src_data + src_step * dst_height, src_step, \
+                                              y_data, y_step, \
+                                              uv_data, uv_step, \
                                               dst_data, dst_step) : \
                     CAROTENE_NS::yuv420sp2bgr(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                              src_data, src_step, \
-                                              src_data + src_step * dst_height, src_step, \
+                                              y_data, y_step, \
+                                              uv_data, uv_step, \
                                               dst_data, dst_step)), \
                 CV_HAL_ERROR_OK : \
             CV_HAL_ERROR_NOT_IMPLEMENTED : \
@@ -1807,29 +1808,32 @@ TegraCvtColor_Invoker(bgrx2hsvf, bgrx2hsv, src_data + static_cast<size_t>(range.
             uIdx == 0 ? \
                 (swapBlue ? \
                     CAROTENE_NS::yuv420i2rgbx(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                              src_data, src_step, \
-                                              src_data + src_step * dst_height, src_step, \
+                                              y_data, y_step, \
+                                              uv_data, uv_step, \
                                               dst_data, dst_step) : \
                     CAROTENE_NS::yuv420i2bgrx(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                              src_data, src_step, \
-                                              src_data + src_step * dst_height, src_step, \
+                                              y_data, y_step, \
+                                              uv_data, uv_step, \
                                               dst_data, dst_step)), \
                 CV_HAL_ERROR_OK : \
             uIdx == 1 ? \
                 (swapBlue ? \
                     CAROTENE_NS::yuv420sp2rgbx(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                               src_data, src_step, \
-                                               src_data + src_step * dst_height, src_step, \
+                                               y_data, y_step, \
+                                               uv_data, uv_step, \
                                                dst_data, dst_step) : \
                     CAROTENE_NS::yuv420sp2bgrx(CAROTENE_NS::Size2D(dst_width, dst_height), \
-                                               src_data, src_step, \
-                                               src_data + src_step * dst_height, src_step, \
+                                               y_data, y_step, \
+                                               uv_data, uv_step, \
                                                dst_data, dst_step)), \
                 CV_HAL_ERROR_OK : \
             CV_HAL_ERROR_NOT_IMPLEMENTED : \
         CV_HAL_ERROR_NOT_IMPLEMENTED \
     : CV_HAL_ERROR_NOT_IMPLEMENTED \
 )
+#define TEGRA_CVT2PYUVTOBGR(src_data, src_step, dst_data, dst_step, dst_width, dst_height, dcn, swapBlue, uIdx) \
+    TEGRA_CVT2PYUVTOBGR_EX(src_data, src_step, src_data + src_step * dst_height, src_step, dst_data, dst_step, \
+            dst_width, dst_height, dcn, swapBlue, uIdx);
 
 #undef cv_hal_cvtBGRtoBGR
 #define cv_hal_cvtBGRtoBGR TEGRA_CVTBGRTOBGR
@@ -1839,12 +1843,92 @@ TegraCvtColor_Invoker(bgrx2hsvf, bgrx2hsv, src_data + static_cast<size_t>(range.
 #define cv_hal_cvtBGRtoGray TEGRA_CVTBGRTOGRAY
 #undef cv_hal_cvtGraytoBGR
 #define cv_hal_cvtGraytoBGR TEGRA_CVTGRAYTOBGR
+#if 0  // bit-exact tests are failed
 #undef cv_hal_cvtBGRtoYUV
 #define cv_hal_cvtBGRtoYUV TEGRA_CVTBGRTOYUV
+#endif
 #undef cv_hal_cvtBGRtoHSV
 #define cv_hal_cvtBGRtoHSV TEGRA_CVTBGRTOHSV
+#if 0  // bit-exact tests are failed
 #undef cv_hal_cvtTwoPlaneYUVtoBGR
 #define cv_hal_cvtTwoPlaneYUVtoBGR TEGRA_CVT2PYUVTOBGR
+#undef cv_hal_cvtTwoPlaneYUVtoBGREx
+#define cv_hal_cvtTwoPlaneYUVtoBGREx TEGRA_CVT2PYUVTOBGR_EX
+#endif
+
+// The optimized branch was developed for old armv7 processors and leads to perf degradation on armv8
+#if defined(DCAROTENE_NEON_ARCH) && (DCAROTENE_NEON_ARCH == 7)
+inline CAROTENE_NS::BORDER_MODE borderCV2Carotene(int borderType)
+{
+    switch(borderType)
+    {
+    case CV_HAL_BORDER_CONSTANT:
+        return CAROTENE_NS::BORDER_MODE_CONSTANT;
+    case CV_HAL_BORDER_REPLICATE:
+        return CAROTENE_NS::BORDER_MODE_REPLICATE;
+    case CV_HAL_BORDER_REFLECT:
+        return CAROTENE_NS::BORDER_MODE_REFLECT;
+    case CV_HAL_BORDER_WRAP:
+        return CAROTENE_NS::BORDER_MODE_WRAP;
+    case CV_HAL_BORDER_REFLECT_101:
+        return CAROTENE_NS::BORDER_MODE_REFLECT101;
+    }
+
+    return CAROTENE_NS::BORDER_MODE_UNDEFINED;
+}
+
+inline int TEGRA_GaussianBlurBinomial(const uchar* src_data, size_t src_step, uchar* dst_data, size_t dst_step,
+                         int width, int height, int depth, int cn, size_t margin_left, size_t margin_top,
+                         size_t margin_right, size_t margin_bottom, size_t ksize, int border_type)
+{
+    CAROTENE_NS::Size2D sz(width, height);
+    CAROTENE_NS::BORDER_MODE border = borderCV2Carotene(border_type);
+    CAROTENE_NS::Margin mg(margin_left, margin_right, margin_top, margin_bottom);
+
+    if (ksize == 3)
+    {
+        if ((depth != CV_8U) || (cn != 1))
+            return CV_HAL_ERROR_NOT_IMPLEMENTED;
+
+        if (CAROTENE_NS::isGaussianBlur3x3MarginSupported(sz, border, mg))
+        {
+            CAROTENE_NS::gaussianBlur3x3Margin(sz, src_data, src_step, dst_data, dst_step,
+                                  border, 0, mg);
+            return CV_HAL_ERROR_OK;
+        }
+    }
+    else if (ksize == 5)
+    {
+        if (!CAROTENE_NS::isGaussianBlur5x5Supported(sz, cn, border))
+            return CV_HAL_ERROR_NOT_IMPLEMENTED;
+
+        if (depth == CV_8U)
+        {
+            CAROTENE_NS::gaussianBlur5x5(sz, cn, (uint8_t*)src_data, src_step,
+                                         (uint8_t*)dst_data, dst_step, border, 0, mg);
+            return CV_HAL_ERROR_OK;
+        }
+        else if (depth == CV_16U)
+        {
+            CAROTENE_NS::gaussianBlur5x5(sz, cn, (uint16_t*)src_data, src_step,
+                                         (uint16_t*)dst_data, dst_step, border, 0, mg);
+            return CV_HAL_ERROR_OK;
+        }
+        else if (depth == CV_16S)
+        {
+            CAROTENE_NS::gaussianBlur5x5(sz, cn, (int16_t*)src_data, src_step,
+                                         (int16_t*)dst_data, dst_step, border, 0, mg);
+           return CV_HAL_ERROR_OK;
+        }
+    }
+
+    return CV_HAL_ERROR_NOT_IMPLEMENTED;
+}
+
+#undef cv_hal_gaussianBlurBinomial
+#define cv_hal_gaussianBlurBinomial TEGRA_GaussianBlurBinomial
+
+#endif // DCAROTENE_NEON_ARCH=7
 
 #endif // OPENCV_IMGPROC_HAL_INTERFACE_H
 
